@@ -46,6 +46,7 @@ Je mets aussi des observations diverses et variées
 -A high play rate for a card could mean it is overplayed, and the deck it is played in are not optimized for it. The GIHWR may be lower than the actual strength of the card in this case. On the other hand, a low play rate would mean that the card is played in the appropriate builds, and the GIHWR should be indicative of its strength.
 -A card that is picked too highly relative to its strength can make a deck weaker, and the GIHWR lower for this card. This could tend to happen for "uncommon signposts", i.e., two colored cards that define an archetype, and rare or mythic cards, that players tend to overpick. 
 -There should be a very strong relationship between the pick order and the play-rate of a card. It would be interesting to look at the correlations between these data. The ALSA data for instance could then be ditched, as it is biased by players overpicking rares for raredrafting, while the play rate at least would give better ideas of card evaluation.
+Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly correlated to pick order. Pick order is however harder to compute, as it is not directly given by 17lands, sticking to play rate is better. -0.872 avec le ATA.
 
 ## 4) Input-Output
 
