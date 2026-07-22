@@ -11,7 +11,7 @@ import torch
 from mtg_rating.fetch_17lands import download_game_data
 from mtg_rating.fetch_scryfall import fetch_set_cards, fetch_card
 from mtg_rating.features import card_to_features
-from mtg_rating.labels import compute_gih_winrate
+from mtg_rating.labels import compute_card_metrics
 from mtg_rating.model import train_toy
 
 SET_CODE = "ECL"
@@ -24,7 +24,7 @@ UNSEEN_TEST_CARDS = ["Lightning Bolt", "Llanowar Elves", "Counterspell"]
 
 def main():
     game_data_path = download_game_data(SET_CODE, EVENT_TYPE)
-    labels = compute_gih_winrate(game_data_path)
+    labels = compute_card_metrics(game_data_path)
     print(f"[labels] {len(labels)} cards with enough games in {SET_CODE}/{EVENT_TYPE}")
 
     set_cards = fetch_set_cards(SET_CODE)

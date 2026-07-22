@@ -1,8 +1,13 @@
 """Turn a Scryfall card object into a fixed-size numeric feature vector.
 
-Deliberately minimal for the v0 toy pipeline: mana value, color one-hot, a coarse
-type one-hot, rarity ordinal, power/toughness.
+Structured fields (mana value, colors, type, rarity, power/toughness) are kept
+deliberately minimal for the v0 toy pipeline. Oracle text is folded in as a frozen
+pretrained embedding (see text_embeddings.py) rather than ignored, so the model can
+pick up on effects that the structured fields alone can't distinguish (e.g. two
+3-mana white creatures with wildly different abilities).
 """
+
+from mtg_rating.text_embeddings import EMBEDDING_DIM, embed_text
 
 COLORS = ["W", "U", "B", "R", "G"]
 TYPES = ["Creature", "Instant", "Sorcery", "Enchantment", "Artifact"]
@@ -25,7 +30,7 @@ def card_to_features(card: dict) -> list:
 
     rarity = RARITIES.get(card.get("rarity", "common"), 0)
 
-    return [
+    structured = [
         float(card.get("cmc", 0.0)),
         *color_features,
         *type_features,
@@ -34,5 +39,10 @@ def card_to_features(card: dict) -> list:
         _parse_pt(card.get("toughness")),
     ]
 
+    text_embedding = embed_text(card.get("oracle_text", ""))
 
-FEATURE_DIM = 1 + len(COLORS) + len(TYPES) + 1 + 2
+    return [*structured, *text_embedding]
+
+
+STRUCTURED_DIM = 1 + len(COLORS) + len(TYPES) + 1 + 2
+FEATURE_DIM = STRUCTURED_DIM + EMBEDDING_DIM
