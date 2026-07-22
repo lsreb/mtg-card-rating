@@ -41,7 +41,7 @@ Je mets aussi des observations diverses et variées
 
 -Converting the 17lands metrics into a 0-10 rating that can be learned. GIH winrate is the main target, but there is a bias I would like to correct. I will give some intuition.
 -GIH winrate is the main target
--Check whether we have access to archetypes winrate, and possibly card winrate and data in a given archetype or color pair. Compare GIH-WR to the color pair winrate
+-It is possible to compare GIH-WR to the color pair winrate to correct a bias. Make sure not to overcorrect when the next point is taken into account.
 -Contextualize GIH-WR with IIH: high GIHWR and high IIH mean that it looks like it is a strong card, and possibly that the deckis built around this card, it may be in a splashed color, as splashed colors make a deck less consistent but stronger if the corresponding card is drawn. High GIHWR and low IIH may mean that the card is a filler (bad or average card) in a strong archetype. Low GIHWR and high IIH could mean that the card is strong in a vacuum but in a weaker archetype. Low GIHWR and low IIH could mean the card is just terrible.
 -A high play rate for a card could mean it is overplayed, and the deck it is played in are not optimized for it. The GIHWR may be lower than the actual strength of the card in this case. On the other hand, a low play rate would mean that the card is played in the appropriate builds, and the GIHWR should be indicative of its strength.
 -A card that is picked too highly relative to its strength can make a deck weaker, and the GIHWR lower for this card. This could tend to happen for "uncommon signposts", i.e., two colored cards that define an archetype, and rare or mythic cards, that players tend to overpick. 
