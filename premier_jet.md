@@ -4,6 +4,8 @@ Je mets aussi des observations diverses et variées
 ## 0) Unorganized thoughts
 -I should probably write in english, Magic: The Gathering is a game mostly played in english.
 -Regarding the 17lands data, I have seen many metrics other than GIH and AlSA (ATA) than may be slightly relevant. For instance, the GP (game played)% could be used to see whether a card is overplayed or underplayed, and give more context on the winrate.
+-Big remark: no one cares about card strength in a vacuum. The context of other cards in the set is important to judge the strentgh of a single card. Strong cards in the same colors or well supported archetypes should have boosted ratings. Find a way to remember context? Make a first run to estimate cards in a vacuum, and a second one to try judge synergies, and shared strength?
+-GP WR vs GIH WR?
 
 ## 1) Objectif
 
@@ -14,13 +16,14 @@ Je mets aussi des observations diverses et variées
 -This neural network would be trained thanks to metrics from cards of previous expansions. These metrics are gathered from 17lands in the Premier Draft sections, mainly GIH winrate, and possibly other metrics to reduce color bias (ATA or ALSA, IIH, color specific winrate if available). The card characteristics are gathered from scryfall.
 -The network should be able to read card text in the context of MTG cards. It may be trained from another language model and tuned specifically for MTG, as card text is very codified.
 
+
+
 ## 1.2) Secondary objectives
 
 -The rating could be given with a short description of the card, or main characteristics: removal, late-game, early-game drop, bomb, etc.
 -This data could be used eventually for bot drafting. The previous characterics would then be useful to build a well balanced deck. 
 -The card rating should eventually be set-dependant. Predicting a metagame (best colors, best decks, best synergies) would be the ultimate goal.
 -More is to come surely
-
 
 
 ## 2) Tools
@@ -47,15 +50,15 @@ Je mets aussi des observations diverses et variées
 -A high play rate for a card could mean it is overplayed, and the deck it is played in are not optimized for it. The GIHWR may be lower than the actual strength of the card in this case. On the other hand, a low play rate would mean that the card is played in the appropriate builds, and the GIHWR should be indicative of its strength.
 -A card that is picked too highly relative to its strength can make a deck weaker, and the GIHWR lower for this card. This could tend to happen for "uncommon signposts", i.e., two colored cards that define an archetype, and rare or mythic cards, that players tend to overpick. 
 -There should be a very strong relationship between the pick order and the play-rate of a card. It would be interesting to look at the correlations between these data. The ALSA data for instance could then be ditched, as it is biased by players overpicking rares for raredrafting, while the play rate at least would give better ideas of card evaluation.
-Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly correlated to pick order. Pick order is however harder to compute, as it is not directly given by 17lands, sticking to play rate is better. -0.872 avec le ATA.
-
--A rating of 0 should be attributed to the worst possible winrate, and 10 to the best. So far we are only trying with ECL, but when we will have more sets, it could be possible that there are no cards worthy of 0 or 10.
+Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly correlated to pick order. Pick order is however harder to compute, as it comes from the draft_data file, heavier and not that necessary. Sticking to play rate is better. -0.872 avec le ATA.
+-Low and high ratings are given with respect to some numbers of standard deviations away from the mean.
 
 ## 3.3) The actual formula
 
 -Work with a fixed set (ECL here at the beginning for instance). 
 -First, fetch the average winrate overall, WR0. WR0 should be 5/10.
 -The IIH correction is quite arbitrary, it should likely be linear. Say, GIH + \alpha * IIH, with \alpha positive. Start with \alpha = 1. The higher it is, the heavier IIH is related to GIH.
+-GIH = GP + (1-p) * IIH, where p is the rate at which a given card is seen during a game (expect around 40%). This lets us fall back on the previous formula and intuition. We can actually use the score GP + \alpha_i * IIH, where \alpha_i may depend on the card. If it is 0, we have GP and the deck bias is huge. With \alpha_i = 1-p, we fall back on GIH and find some balance between the deck bias and card bias induced from IIH. As a starter, we could therefore either use GP+IIH, or GIH+IIH.
 -The winrate correction with playrate sounds too arbitrary and should be left aside for now.
 -I found the magic flea website which looks like a nice source to study on.
 

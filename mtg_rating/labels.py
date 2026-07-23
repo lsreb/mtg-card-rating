@@ -11,10 +11,15 @@ membership is constant across the games played with a given build).
 Metrics:
 - gih_wr: win rate among games where the card was ever in hand (opening hand or
   drawn later).
-- gnd_wr: win rate among games where the card was in the deck but never drawn.
+- gns_wr ("games not seen"): win rate among games where the card was in the deck but
+  never showed up in hand at all (neither opening hand nor drawn). Note: 17Lands'
+  own public field for this is misleadingly named `never_drawn_win_rate` -- despite
+  the name, it's defined as the complement of `ever_drawn` (which includes opening
+  hand), i.e. it really means "never seen", not narrowly "never drawn from the
+  library". Named gns_wr/gns_count here to avoid that ambiguity.
 - iih (a.k.a. IWD, "improvement when drawn" in 17Lands' own terminology):
-  gih_wr - gnd_wr. Isolates the card's marginal impact from the deck's overall
-  strength, since gnd_wr already reflects "how good is this deck without this card
+  gih_wr - gns_wr. Isolates the card's marginal impact from the deck's overall
+  strength, since gns_wr already reflects "how good is this deck without this card
   showing up".
 - play_rate: among unique deck builds where the card was in the pool (in the deck OR
   the sideboard), the fraction where it was actually maindecked. A proxy for how
@@ -46,17 +51,17 @@ def compute_card_metrics(game_data_path, min_games: int = 200) -> dict:
 
     results = {}
     for name in card_names:
-        ever_drawn = (df[f"{OPENING_HAND_PREFIX}{name}"] > 0) | (df[f"{DRAWN_PREFIX}{name}"] > 0)
+        ever_seen = (df[f"{OPENING_HAND_PREFIX}{name}"] > 0) | (df[f"{DRAWN_PREFIX}{name}"] > 0)
         in_deck = df[f"{DECK_PREFIX}{name}"] > 0
-        never_drawn = in_deck & ~ever_drawn
+        never_seen = in_deck & ~ever_seen
 
-        gih_count = int(ever_drawn.sum())
+        gih_count = int(ever_seen.sum())
         if gih_count < min_games:
             continue
-        gnd_count = int(never_drawn.sum())
+        gns_count = int(never_seen.sum())
 
-        gih_wr = float(won[ever_drawn].mean())
-        gnd_wr = float(won[never_drawn].mean()) if gnd_count > 0 else None
+        gih_wr = float(won[ever_seen].mean())
+        gns_wr = float(won[never_seen].mean()) if gns_count > 0 else None
 
         build_in_deck = builds[f"{DECK_PREFIX}{name}"] > 0
         build_in_sideboard = builds[f"{SIDEBOARD_PREFIX}{name}"] > 0
@@ -66,9 +71,9 @@ def compute_card_metrics(game_data_path, min_games: int = 200) -> dict:
         results[name] = {
             "gih_wr": gih_wr,
             "gih_count": gih_count,
-            "gnd_wr": gnd_wr,
-            "gnd_count": gnd_count,
-            "iih": (gih_wr - gnd_wr) if gnd_wr is not None else None,
+            "gns_wr": gns_wr,
+            "gns_count": gns_count,
+            "iih": (gih_wr - gns_wr) if gns_wr is not None else None,
             "play_rate": play_rate,
             "pool_count": pool_count,
         }
