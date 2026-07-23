@@ -41,12 +41,23 @@ Je mets aussi des observations diverses et variées
 
 -Converting the 17lands metrics into a 0-10 rating that can be learned. GIH winrate is the main target, but there is a bias I would like to correct. I will give some intuition.
 -GIH winrate is the main target
--It is possible to compare GIH-WR to the color pair winrate to correct a bias. Make sure not to overcorrect when the next point is taken into account.
+-It is possible to compare GIH-WR to the color pair winrate to correct a bias. Make sure not to overcorrect when the next point is taken into account. However it looks like we should be careful with it, not overuse it. I would like to prioritize IIH.
 -Contextualize GIH-WR with IIH: high GIHWR and high IIH mean that it looks like it is a strong card, and possibly that the deckis built around this card, it may be in a splashed color, as splashed colors make a deck less consistent but stronger if the corresponding card is drawn. High GIHWR and low IIH may mean that the card is a filler (bad or average card) in a strong archetype. Low GIHWR and high IIH could mean that the card is strong in a vacuum but in a weaker archetype. Low GIHWR and low IIH could mean the card is just terrible.
+-This being said, we cannot simply compare IIH. A good card that forces you to play a bad archetype...is a not that good.
 -A high play rate for a card could mean it is overplayed, and the deck it is played in are not optimized for it. The GIHWR may be lower than the actual strength of the card in this case. On the other hand, a low play rate would mean that the card is played in the appropriate builds, and the GIHWR should be indicative of its strength.
 -A card that is picked too highly relative to its strength can make a deck weaker, and the GIHWR lower for this card. This could tend to happen for "uncommon signposts", i.e., two colored cards that define an archetype, and rare or mythic cards, that players tend to overpick. 
 -There should be a very strong relationship between the pick order and the play-rate of a card. It would be interesting to look at the correlations between these data. The ALSA data for instance could then be ditched, as it is biased by players overpicking rares for raredrafting, while the play rate at least would give better ideas of card evaluation.
 Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly correlated to pick order. Pick order is however harder to compute, as it is not directly given by 17lands, sticking to play rate is better. -0.872 avec le ATA.
+
+-A rating of 0 should be attributed to the worst possible winrate, and 10 to the best. So far we are only trying with ECL, but when we will have more sets, it could be possible that there are no cards worthy of 0 or 10.
+
+## 3.3) The actual formula
+
+-Work with a fixed set (ECL here at the beginning for instance). 
+-First, fetch the average winrate overall, WR0. WR0 should be 5/10.
+-The IIH correction is quite arbitrary, it should likely be linear. Say, GIH + \alpha * IIH, with \alpha positive. Start with \alpha = 1. The higher it is, the heavier IIH is related to GIH.
+-The winrate correction with playrate sounds too arbitrary and should be left aside for now.
+-I found the magic flea website which looks like a nice source to study on.
 
 ## 4) Input-Output
 
