@@ -21,6 +21,15 @@ Metrics:
   gih_wr - gns_wr. Isolates the card's marginal impact from the deck's overall
   strength, since gns_wr already reflects "how good is this deck without this card
   showing up".
+- gp_wr ("games played"): win rate among ALL games where the card was in the deck,
+  drawn or not. With p = gih_count / (gih_count + gns_count) (fraction of games the
+  card was actually seen), gp_wr = p*gih_wr + (1-p)*gns_wr, which gives the exact
+  identity gih_wr = gp_wr + (1-p)*iih -- gp_wr, gih_wr and iih alone are enough to
+  recover (1-p) (= (gih_wr - gp_wr) / iih) if ever needed, so it isn't stored
+  separately here. gp_wr is dominated by the gns population for a typical card (only
+  seen in ~40-50% of its games), so it's a *more* diluted/context-heavy signal than
+  gih_wr, not a bias-reduced one -- see project memory for why gp_wr was considered
+  and set aside as a worse target than gih_wr/iih for isolating card-level impact.
 - play_rate: among unique deck builds where the card was in the pool (in the deck OR
   the sideboard), the fraction where it was actually maindecked. A proxy for how
   often the card is considered worth playing when available.
@@ -62,6 +71,7 @@ def compute_card_metrics(game_data_path, min_games: int = 200) -> dict:
 
         gih_wr = float(won[ever_seen].mean())
         gns_wr = float(won[never_seen].mean()) if gns_count > 0 else None
+        gp_wr = float(won[in_deck].mean())
 
         build_in_deck = builds[f"{DECK_PREFIX}{name}"] > 0
         build_in_sideboard = builds[f"{SIDEBOARD_PREFIX}{name}"] > 0
@@ -74,6 +84,7 @@ def compute_card_metrics(game_data_path, min_games: int = 200) -> dict:
             "gns_wr": gns_wr,
             "gns_count": gns_count,
             "iih": (gih_wr - gns_wr) if gns_wr is not None else None,
+            "gp_wr": gp_wr,
             "play_rate": play_rate,
             "pool_count": pool_count,
         }
