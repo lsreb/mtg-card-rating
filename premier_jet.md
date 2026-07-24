@@ -58,7 +58,7 @@ Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly co
 -Work with a fixed set (ECL here at the beginning for instance). 
 -First, fetch the average winrate overall, WR0. WR0 should be 5/10.
 -The IIH correction is quite arbitrary, it should likely be linear. Say, GIH + \alpha * IIH, with \alpha positive. Start with \alpha = 1. The higher it is, the heavier IIH is related to GIH.
--GIH = GP + (1-p) * IIH, where p is the rate at which a given card is seen during a game (expect around 40%). This lets us fall back on the previous formula and intuition. We can actually use the score GP + \alpha_i * IIH, where \alpha_i may depend on the card. If it is 0, we have GP and the deck bias is huge. With \alpha_i = 1-p, we fall back on GIH and find some balance between the deck bias and card bias induced from IIH. As a starter, we could therefore either use GP+IIH, or GIH+IIH.
+-GIH = GP + (1-p) * IIH, where p is the rate at which a given card is seen during a game (expect around 40%). This lets us fall back on the previous formula and intuition. We can actually use the score GP + \alpha_i * IIH, where \alpha_i may depend on the card. If it is 0, we have GP and the deck bias is huge. With \alpha_i = 1-p, we fall back on GIH and find some balance between the deck bias and card bias induced from IIH. As a starter, we could therefore either use GIH, GP+IIH, or GIH+IIH.
 -The winrate correction with playrate sounds too arbitrary and should be left aside for now.
 -I found the magic flea website which looks like a nice source to study on.
 
