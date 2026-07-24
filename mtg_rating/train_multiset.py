@@ -22,6 +22,8 @@ from mtg_rating.multiset import METRIC_FIELDS, build_dataset
 from mtg_rating.ratings import RAW_SCORE_FORMULAS, apply_normalization, fit_normalization
 
 POOL_SUMMARY_PATH = Path(__file__).resolve().parent.parent / "data" / "raw" / "multiset_pool.csv"
+DATASET_CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "raw" / "multiset_dataset.npz"
+CACHE_FIELDS = ["gih_wr", "gns_wr", "iih", "gp_wr", "play_rate"]
 
 TEST_FRACTION = 0.2
 SPLIT_SEED = 42
@@ -63,9 +65,48 @@ def save_pool_summary(records: list, path: Path):
         print(f"[dataset]   {set_code}: {count}")
 
 
-def main():
+def load_or_build_dataset() -> list:
+    """Like build_dataset(), but also computes (and caches) each record's feature
+    vector -- the MiniLM embedding pass over thousands of cards is the most
+    expensive step once the per-set metrics/Scryfall caches already exist, and
+    unlike those, it wasn't being cached at all before: every run recomputed every
+    embedding from scratch. Cached as a single .npz (features are dense float
+    arrays; CSV would work but be far bigger and slower to parse back)."""
+    if DATASET_CACHE_PATH.exists():
+        data = np.load(DATASET_CACHE_PATH, allow_pickle=False)
+        records = [
+            {
+                "name": str(data["names"][i]),
+                "set_code": str(data["set_codes"][i]),
+                "features": data["features"][i].tolist(),
+                **{field: float(data[field][i]) for field in CACHE_FIELDS},
+            }
+            for i in range(len(data["names"]))
+        ]
+        print(f"[cache] loaded {len(records)} records (with features) from {DATASET_CACHE_PATH}")
+        return records
+
     records = build_dataset()
     save_pool_summary(records, POOL_SUMMARY_PATH)
+
+    print("[features] computing feature vectors...")
+    for r in records:
+        r["features"] = card_to_features(r["scryfall_card"])
+
+    DATASET_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        DATASET_CACHE_PATH,
+        names=np.array([r["name"] for r in records]),
+        set_codes=np.array([r["set_code"] for r in records]),
+        features=np.array([r["features"] for r in records], dtype=np.float32),
+        **{field: np.array([r[field] for r in records], dtype=np.float64) for field in CACHE_FIELDS},
+    )
+    print(f"[cache] saved {len(records)} records (with features) to {DATASET_CACHE_PATH}")
+    return records
+
+
+def main():
+    records = load_or_build_dataset()
 
     train_names, test_names = split_by_name(records, TEST_FRACTION, SPLIT_SEED)
     assert train_names.isdisjoint(test_names)
@@ -75,9 +116,8 @@ def main():
     test_records = [r for r in records if r["name"] in test_names]
     print(f"[split] {len(train_records)} train rows, {len(test_records)} test rows")
 
-    print("[features] computing feature vectors...")
-    train_features = [card_to_features(r["scryfall_card"]) for r in train_records]
-    test_features = [card_to_features(r["scryfall_card"]) for r in test_records]
+    train_features = [r["features"] for r in train_records]
+    test_features = [r["features"] for r in test_records]
     unseen_features = {name: card_to_features(fetch_card(name)) for name in UNSEEN_TEST_CARDS}
 
     for formula, fn in RAW_SCORE_FORMULAS.items():

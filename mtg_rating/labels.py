@@ -49,24 +49,41 @@ SIDEBOARD_PREFIX = "sideboard_"
 BASIC_LAND_NAMES = {"Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"}
 
 
-def compute_card_metrics(game_data_path, min_games: int = 200) -> dict:
+def compute_card_metrics(game_data_path, min_games: int = 200, include_play_rate: bool = False) -> dict:
     # game_data files are very wide (hundreds to thousands of per-card columns).
     # Loading the whole thing with pandas' default dtypes OOM-killed a run on a
     # bigger set (FDN) even though smaller sets (ECL) had been fine -- read only the
     # columns this function actually uses (skip `tutored_*` and other metadata) and
     # downcast the per-card count columns to int8 (same fix applied to draft_data
     # loading earlier; game_data needed it too, as flagged but not yet done back then).
+    #
+    # play_rate/pool_count are only used for diagnostics (not by any of ratings.py's
+    # formulas), and computing them needs `sideboard_*` plus a `drop_duplicates` over
+    # every row (draft_id/build_index) -- a real extra cost on files this wide/long.
+    # Skipped by default; pass include_play_rate=True to get them back.
     header = pd.read_csv(game_data_path, nrows=0)
     card_cols = [
         col for col in header.columns
-        if col.startswith((OPENING_HAND_PREFIX, DRAWN_PREFIX, DECK_PREFIX, SIDEBOARD_PREFIX))
+        if col.startswith((OPENING_HAND_PREFIX, DRAWN_PREFIX, DECK_PREFIX))
     ]
-    usecols = ["won", "draft_id", "build_index"] + card_cols
-    dtype = {col: "int8" for col in card_cols}
-    dtype["draft_id"] = "category"
+    usecols = ["won"] + card_cols
+    # Some sets have missing values in a handful of per-card columns (plain int8
+    # can't hold NaN and raised "Integer column has NA values" on VOW/MID/STX) --
+    # "Int8" (nullable) reads fine, then fillna(0) treats "missing" as "0 copies",
+    # a reasonable reading, and lets everything downstream use plain int8 again.
+    dtype = {col: "Int8" for col in card_cols}
+
+    sideboard_cols = []
+    if include_play_rate:
+        sideboard_cols = [col for col in header.columns if col.startswith(SIDEBOARD_PREFIX)]
+        usecols += ["draft_id", "build_index"] + sideboard_cols
+        dtype.update({col: "Int8" for col in sideboard_cols})
+        dtype["draft_id"] = "category"
 
     df = pd.read_csv(game_data_path, usecols=usecols, dtype=dtype)
-    won = df["won"].astype(bool)
+    all_card_cols = card_cols + sideboard_cols
+    df[all_card_cols] = df[all_card_cols].fillna(0).astype("int8")
+    won = df["won"].fillna(False).astype(bool)
 
     card_names = sorted(
         col[len(OPENING_HAND_PREFIX):]
@@ -74,10 +91,11 @@ def compute_card_metrics(game_data_path, min_games: int = 200) -> dict:
         if col.startswith(OPENING_HAND_PREFIX) and col[len(OPENING_HAND_PREFIX):] not in BASIC_LAND_NAMES
     )
 
-    # One row per unique deck build: deck/sideboard membership doesn't change across
-    # the games played with the same build, so this avoids over-weighting play rate
-    # by how many games a given build happened to play (e.g. Bo3 vs Bo1).
-    builds = df.drop_duplicates(subset=["draft_id", "build_index"])
+    if include_play_rate:
+        # One row per unique deck build: deck/sideboard membership doesn't change
+        # across the games played with the same build, so this avoids over-weighting
+        # play rate by how many games a given build happened to play (Bo3 vs Bo1).
+        builds = df.drop_duplicates(subset=["draft_id", "build_index"])
 
     results = {}
     for name in card_names:
@@ -94,10 +112,12 @@ def compute_card_metrics(game_data_path, min_games: int = 200) -> dict:
         gns_wr = float(won[never_seen].mean()) if gns_count > 0 else None
         gp_wr = float(won[in_deck].mean())
 
-        build_in_deck = builds[f"{DECK_PREFIX}{name}"] > 0
-        build_in_sideboard = builds[f"{SIDEBOARD_PREFIX}{name}"] > 0
-        pool_count = int((build_in_deck | build_in_sideboard).sum())
-        play_rate = float(build_in_deck.sum() / pool_count) if pool_count > 0 else None
+        play_rate = pool_count = None
+        if include_play_rate:
+            build_in_deck = builds[f"{DECK_PREFIX}{name}"] > 0
+            build_in_sideboard = builds[f"{SIDEBOARD_PREFIX}{name}"] > 0
+            pool_count = int((build_in_deck | build_in_sideboard).sum())
+            play_rate = float(build_in_deck.sum() / pool_count) if pool_count > 0 else None
 
         results[name] = {
             "gih_wr": gih_wr,
