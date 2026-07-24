@@ -49,6 +49,13 @@ SIDEBOARD_PREFIX = "sideboard_"
 BASIC_LAND_NAMES = {"Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"}
 
 
+def _is_basic_land_col(col: str) -> bool:
+    for prefix in (OPENING_HAND_PREFIX, DRAWN_PREFIX, DECK_PREFIX, SIDEBOARD_PREFIX):
+        if col.startswith(prefix) and col[len(prefix):] in BASIC_LAND_NAMES:
+            return True
+    return False
+
+
 def compute_card_metrics(game_data_path, min_games: int = 200, include_play_rate: bool = False) -> dict:
     # game_data files are very wide (hundreds to thousands of per-card columns).
     # Loading the whole thing with pandas' default dtypes OOM-killed a run on a
@@ -61,10 +68,13 @@ def compute_card_metrics(game_data_path, min_games: int = 200, include_play_rate
     # formulas), and computing them needs `sideboard_*` plus a `drop_duplicates` over
     # every row (draft_id/build_index) -- a real extra cost on files this wide/long.
     # Skipped by default; pass include_play_rate=True to get them back.
+    # Basic land columns are never used below (card_names already excludes them) --
+    # drop them here too instead of just at iteration time, so they're never even
+    # read from the CSV in the first place.
     header = pd.read_csv(game_data_path, nrows=0)
     card_cols = [
         col for col in header.columns
-        if col.startswith((OPENING_HAND_PREFIX, DRAWN_PREFIX, DECK_PREFIX))
+        if col.startswith((OPENING_HAND_PREFIX, DRAWN_PREFIX, DECK_PREFIX)) and not _is_basic_land_col(col)
     ]
     usecols = ["won"] + card_cols
     # Some sets have missing values in a handful of per-card columns (plain int8
@@ -75,7 +85,10 @@ def compute_card_metrics(game_data_path, min_games: int = 200, include_play_rate
 
     sideboard_cols = []
     if include_play_rate:
-        sideboard_cols = [col for col in header.columns if col.startswith(SIDEBOARD_PREFIX)]
+        sideboard_cols = [
+            col for col in header.columns
+            if col.startswith(SIDEBOARD_PREFIX) and not _is_basic_land_col(col)
+        ]
         usecols += ["draft_id", "build_index"] + sideboard_cols
         dtype.update({col: "Int8" for col in sideboard_cols})
         dtype["draft_id"] = "category"
