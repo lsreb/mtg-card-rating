@@ -42,15 +42,36 @@ DRAWN_PREFIX = "drawn_"
 DECK_PREFIX = "deck_"
 SIDEBOARD_PREFIX = "sideboard_"
 
+# Basic land names are fixed across all Magic sets (no set has ever added a new one
+# in decades of design) -- excluded everywhere, not just for visualization: their
+# draw dynamics (~100% play rate, huge sample counts, no real "power level") don't
+# belong in the same training/validation population as spells.
+BASIC_LAND_NAMES = {"Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"}
+
 
 def compute_card_metrics(game_data_path, min_games: int = 200) -> dict:
-    df = pd.read_csv(game_data_path)
+    # game_data files are very wide (hundreds to thousands of per-card columns).
+    # Loading the whole thing with pandas' default dtypes OOM-killed a run on a
+    # bigger set (FDN) even though smaller sets (ECL) had been fine -- read only the
+    # columns this function actually uses (skip `tutored_*` and other metadata) and
+    # downcast the per-card count columns to int8 (same fix applied to draft_data
+    # loading earlier; game_data needed it too, as flagged but not yet done back then).
+    header = pd.read_csv(game_data_path, nrows=0)
+    card_cols = [
+        col for col in header.columns
+        if col.startswith((OPENING_HAND_PREFIX, DRAWN_PREFIX, DECK_PREFIX, SIDEBOARD_PREFIX))
+    ]
+    usecols = ["won", "draft_id", "build_index"] + card_cols
+    dtype = {col: "int8" for col in card_cols}
+    dtype["draft_id"] = "category"
+
+    df = pd.read_csv(game_data_path, usecols=usecols, dtype=dtype)
     won = df["won"].astype(bool)
 
     card_names = sorted(
         col[len(OPENING_HAND_PREFIX):]
         for col in df.columns
-        if col.startswith(OPENING_HAND_PREFIX)
+        if col.startswith(OPENING_HAND_PREFIX) and col[len(OPENING_HAND_PREFIX):] not in BASIC_LAND_NAMES
     )
 
     # One row per unique deck build: deck/sideboard membership doesn't change across

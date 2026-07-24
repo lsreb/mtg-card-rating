@@ -15,7 +15,12 @@ gih_wr = gp_wr + (1 - p) * iih (p = fraction of games the card was actually draw
 
 0-10 normalization: 5 = mean across the card pool, 0 and 10 = mean +/- STD_MULTIPLIER
 standard deviations of the raw score (not literal min/max, which is an unstable,
-noisy estimate on a single set), clipped to [0, 10].
+noisy estimate on a single set), clipped to [0, 10]. `fit_normalization` and
+`apply_normalization` are split apart (rather than baked into one step) so a
+train/test pipeline can fit mu/sigma on the training split only and apply that same
+transform to held-out data, instead of leaking test-set statistics into the scale.
+`normalize_to_10` is the fit+apply shortcut used when there's no split (single-set
+smoke test).
 """
 
 import statistics
@@ -34,14 +39,20 @@ def raw_scores(metrics: dict, formula: str) -> dict:
     return {name: fn(m) for name, m in metrics.items() if m.get("iih") is not None}
 
 
-def normalize_to_10(raw: dict) -> dict:
+def fit_normalization(raw: dict) -> tuple:
     values = list(raw.values())
-    mu = statistics.fmean(values)
-    sigma = statistics.stdev(values)
+    return statistics.fmean(values), statistics.stdev(values)
+
+
+def apply_normalization(raw: dict, mu: float, sigma: float) -> dict:
     return {
-        name: min(10.0, max(0.0, 5 + 5 * (v - mu) / (STD_MULTIPLIER * sigma)))
-        for name, v in raw.items()
+        key: min(10.0, max(0.0, 5 + 5 * (v - mu) / (STD_MULTIPLIER * sigma)))
+        for key, v in raw.items()
     }
+
+
+def normalize_to_10(raw: dict) -> dict:
+    return apply_normalization(raw, *fit_normalization(raw))
 
 
 def compute_ratings(metrics: dict, formula: str) -> dict:
