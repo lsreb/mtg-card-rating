@@ -18,7 +18,7 @@ import torch
 from mtg_rating.features import card_to_features
 from mtg_rating.fetch_scryfall import fetch_card
 from mtg_rating.model import train_toy
-from mtg_rating.multiset import METRIC_FIELDS, build_dataset
+from mtg_rating.multiset import METRIC_FIELDS, _round_metric, build_dataset
 from mtg_rating.ratings import RAW_SCORE_FORMULAS, apply_normalization, fit_normalization
 
 POOL_SUMMARY_PATH = Path(__file__).resolve().parent.parent / "data" / "raw" / "multiset_pool.csv"
@@ -55,7 +55,11 @@ def save_pool_summary(records: list, path: Path):
         writer = csv.DictWriter(f, fieldnames=["name", "set_code"] + METRIC_FIELDS)
         writer.writeheader()
         for r in records:
-            writer.writerow({"name": r["name"], "set_code": r["set_code"], **{k: r.get(k) for k in METRIC_FIELDS}})
+            writer.writerow({
+                "name": r["name"],
+                "set_code": r["set_code"],
+                **{k: _round_metric(r.get(k)) for k in METRIC_FIELDS},
+            })
 
     per_set = {}
     for r in records:

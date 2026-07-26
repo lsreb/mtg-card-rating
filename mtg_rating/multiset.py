@@ -43,13 +43,22 @@ def _load_cached_metrics(path: Path) -> dict:
     return metrics
 
 
+def _round_metric(v):
+    # Win rates carry sampling noise on the order of sqrt(p(1-p)/n) -- at
+    # min_games=200 that's already ~3.5 points of %, and even the best-sampled
+    # cards (tens of thousands of games) only get to ~1e-3/1e-4. Anything past
+    # the 4th decimal in the raw float repr is binary noise, not signal, so
+    # rounding here loses nothing real while cutting cache file size a lot.
+    return round(v, 4) if isinstance(v, float) else v
+
+
 def _save_metrics_cache(path: Path, metrics: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["name"] + METRIC_FIELDS)
         writer.writeheader()
         for name, m in metrics.items():
-            writer.writerow({"name": name, **{k: m.get(k) for k in METRIC_FIELDS}})
+            writer.writerow({"name": name, **{k: _round_metric(m.get(k)) for k in METRIC_FIELDS}})
 
 
 def get_set_metrics(set_code: str, event_type: str = "PremierDraft") -> dict:
