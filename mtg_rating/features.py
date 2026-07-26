@@ -21,7 +21,7 @@ def _parse_pt(value) -> float:
         return 0.0
 
 
-def card_to_features(card: dict) -> list:
+def structured_features(card: dict) -> list:
     colors = card.get("colors", [])
     color_features = [1.0 if c in colors else 0.0 for c in COLORS]
 
@@ -30,7 +30,7 @@ def card_to_features(card: dict) -> list:
 
     rarity = RARITIES.get(card.get("rarity", "common"), 0)
 
-    structured = [
+    return [
         float(card.get("cmc", 0.0)),
         *color_features,
         *type_features,
@@ -39,9 +39,10 @@ def card_to_features(card: dict) -> list:
         _parse_pt(card.get("toughness")),
     ]
 
-    text_embedding = embed_text(card.get("oracle_text", ""))
 
-    return [*structured, *text_embedding]
+def card_to_features(card: dict) -> list:
+    text_embedding = embed_text(card.get("oracle_text", ""))
+    return [*structured_features(card), *text_embedding]
 
 
 STRUCTURED_DIM = 1 + len(COLORS) + len(TYPES) + 1 + 2
