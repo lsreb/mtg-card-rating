@@ -9,8 +9,8 @@ train_lora.py for the training loop.
 import torch
 from torch import nn
 
-from mtg_rating.lora_text_encoder import LoraTextEncoder
-from mtg_rating.text_embeddings import EMBEDDING_DIM
+from mtg_rating.lora_text_encoder import LORA_RANK, LoraTextEncoder
+from mtg_rating.text_embeddings import EMBEDDING_DIM, MODEL_NAME
 
 
 class CardRatingNetJoint(nn.Module):
@@ -18,12 +18,13 @@ class CardRatingNetJoint(nn.Module):
         self,
         structured_dim: int,
         hidden_dim: int = 16,
-        lora_rank: int = 4,
+        lora_rank: int = LORA_RANK,
         lora_dropout: float = 0.0,
         head_dropout: float = 0.0,
+        base_model_path=MODEL_NAME,
     ):
         super().__init__()
-        self.text_encoder = LoraTextEncoder(rank=lora_rank, dropout=lora_dropout)
+        self.text_encoder = LoraTextEncoder(rank=lora_rank, dropout=lora_dropout, base_model_path=base_model_path)
         self.head = nn.Sequential(
             nn.Linear(structured_dim + EMBEDDING_DIM, hidden_dim),
             nn.GELU(),

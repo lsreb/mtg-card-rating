@@ -21,10 +21,14 @@ LORA_TARGET_MODULES = ["query", "value"]
 
 
 class LoraTextEncoder(nn.Module):
-    def __init__(self, rank: int = LORA_RANK, dropout: float = 0.0):
+    def __init__(self, rank: int = LORA_RANK, dropout: float = 0.0, base_model_path=MODEL_NAME):
         super().__init__()
-        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        base_model = AutoModel.from_pretrained(MODEL_NAME)
+        # base_model_path defaults to the generic sentence-transformers checkpoint,
+        # but can point instead to a locally MLM-pretrained MiniLM (see
+        # mlm_pretrain.py) -- same architecture/tokenizer, different starting
+        # weights for the encoder this LoRA then adapts further.
+        self.tokenizer = AutoTokenizer.from_pretrained(base_model_path)
+        base_model = AutoModel.from_pretrained(base_model_path)
         lora_config = LoraConfig(
             r=rank,
             lora_alpha=2 * rank,

@@ -27,6 +27,7 @@ from mtg_rating.features import structured_features
 from mtg_rating.model_joint import CardRatingNetJoint
 from mtg_rating.multiset import SET_CODES, build_dataset
 from mtg_rating.ratings import RAW_SCORE_FORMULAS, apply_normalization, fit_normalization
+from mtg_rating.text_embeddings import MODEL_NAME
 from mtg_rating.train_multiset import pearson
 
 CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / "data" / "models" / "lora_joint"
@@ -115,6 +116,7 @@ def main(
     lora_lr: float = LORA_LR,
     head_lr: float = HEAD_LR,
     formula: str = FORMULA,
+    base_model_path=MODEL_NAME,
     checkpoint_dir: Path = None,
 ):
     # `seed` controls only model init (LoRA adapter matrices, head) and epoch
@@ -152,6 +154,7 @@ def main(
         lora_rank=lora_rank,
         lora_dropout=lora_dropout,
         head_dropout=head_dropout,
+        base_model_path=base_model_path,
     ).to(DEVICE)
     model.text_encoder.print_trainable_parameters()
     optimizer = torch.optim.Adam(
