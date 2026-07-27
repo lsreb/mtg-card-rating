@@ -26,7 +26,7 @@ class CardRatingNetJoint(nn.Module):
         self.text_encoder = LoraTextEncoder(rank=lora_rank, dropout=lora_dropout)
         self.head = nn.Sequential(
             nn.Linear(structured_dim + EMBEDDING_DIM, hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(head_dropout),
             nn.Linear(hidden_dim, 1),
         )

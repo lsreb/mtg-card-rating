@@ -12,6 +12,13 @@ gih_wr = gp_wr + (1 - p) * iih (p = fraction of games the card was actually draw
   fraction of its games sits closer to "gih_iih"; one seen rarely sits closer to
   "gih". See project discussion/memory for why this makes it a natural middle
   ground between the two other formulas, not just a visual coincidence.
+- "gih_2iih"/"gih_3iih"/"gih_5iih": gih_wr + k*iih for k=2,3,5 -- not part of
+  the original three, added to probe further along the same axis: in terms of
+  gp_wr, gp_iih is gp_wr + 1*iih, gih_iih is gp_wr + (2-p)*iih, so gih_kiih is
+  gp_wr + (k+1-p)*iih -- each step pushes the intrinsic/decontextualized
+  weighting further past gih_iih rather than back towards gih, to see whether
+  the trend (gih_2iih beat gih_iih beat gp_iih empirically, seed 0) keeps
+  improving or eventually reverses.
 
 0-10 normalization: 5 = mean across the card pool, 0 and 10 = mean +/- STD_MULTIPLIER
 standard deviations of the raw score (not literal min/max, which is an unstable,
@@ -31,6 +38,12 @@ RAW_SCORE_FORMULAS = {
     "gih": lambda m: m["gih_wr"],
     "gih_iih": lambda m: m["gih_wr"] + m["iih"],
     "gp_iih": lambda m: m["gp_wr"] + m["iih"],
+    "gih_2iih": lambda m: m["gih_wr"] + 2 * m["iih"],
+    "gih_3iih": lambda m: m["gih_wr"] + 3 * m["iih"],
+    "gih_5iih": lambda m: m["gih_wr"] + 5 * m["iih"],
+    "gih_10iih": lambda m: m["gih_wr"] + 10 * m["iih"],
+    "gih_15iih": lambda m: m["gih_wr"] + 15 * m["iih"],
+    "iih_only": lambda m: m["iih"],
 }
 
 

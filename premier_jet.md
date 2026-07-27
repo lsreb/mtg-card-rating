@@ -6,6 +6,8 @@ Je mets aussi des observations diverses et variées
 -Regarding the 17lands data, I have seen many metrics other than GIH and AlSA (ATA) than may be slightly relevant. For instance, the GP (game played)% could be used to see whether a card is overplayed or underplayed, and give more context on the winrate.
 -Big remark: no one cares about card strength in a vacuum. The context of other cards in the set is important to judge the strentgh of a single card. Strong cards in the same colors or well supported archetypes should have boosted ratings. Find a way to remember context? Make a first run to estimate cards in a vacuum, and a second one to try judge synergies, and shared strength?
 -GP WR vs GIH WR?
+-IIH on its own is easier to learn as it removes the dependency on the set. However it may not be that useful to rate the actual strength of multicolored cards or buildaround cards.
+-In order to properly train with the goal to evaluate a whole set, the whole set GIH may be the target...but we would have very very little data in this case.
 
 ## 1) Objectif
 

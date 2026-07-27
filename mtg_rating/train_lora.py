@@ -112,6 +112,9 @@ def main(
     lora_rank: int = 4,
     lora_dropout: float = 0.0,
     head_dropout: float = 0.0,
+    lora_lr: float = LORA_LR,
+    head_lr: float = HEAD_LR,
+    formula: str = FORMULA,
     checkpoint_dir: Path = None,
 ):
     # `seed` controls only model init (LoRA adapter matrices, head) and epoch
@@ -131,7 +134,7 @@ def main(
     test_records = [r for r in records if r["name"] in test_names]
     print(f"[split] {len(train_records)} train rows, {len(val_records)} val rows, {len(test_records)} test rows")
 
-    fn = RAW_SCORE_FORMULAS[FORMULA]
+    fn = RAW_SCORE_FORMULAS[formula]
     train_raw = {i: fn(r) for i, r in enumerate(train_records)}
     val_raw = {i: fn(r) for i, r in enumerate(val_records)}
     test_raw = {i: fn(r) for i, r in enumerate(test_records)}
@@ -153,8 +156,8 @@ def main(
     model.text_encoder.print_trainable_parameters()
     optimizer = torch.optim.Adam(
         [
-            {"params": model.text_encoder.trainable_parameters(), "lr": LORA_LR},
-            {"params": model.head.parameters(), "lr": HEAD_LR},
+            {"params": model.text_encoder.trainable_parameters(), "lr": lora_lr},
+            {"params": model.head.parameters(), "lr": head_lr},
         ]
     )
     loss_fn = nn.MSELoss()
@@ -208,10 +211,10 @@ def main(
     # the reported number would be optimistically biased by having picked the
     # checkpoint that happens to look best on this specific test set.
     test_mse, test_corr, preds = evaluate(model, test_records, test_targets)
-    print(f"[test:{FORMULA}] n={len(test_targets)} MSE={test_mse:.3f} Pearson r={test_corr:.3f}")
+    print(f"[test:{formula}] n={len(test_targets)} MSE={test_mse:.3f} Pearson r={test_corr:.3f}")
 
     if save:
-        save_checkpoint(model, mu, sigma, FORMULA, checkpoint_dir=checkpoint_dir)
+        save_checkpoint(model, mu, sigma, formula, checkpoint_dir=checkpoint_dir)
     # best_val_mse is returned so a multi-seed sweep can pick which checkpoint to
     # keep by val score, not test score -- selecting on test would reintroduce
     # the exact bias early stopping was written to avoid, just at the seed level
