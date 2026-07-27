@@ -21,7 +21,7 @@ LORA_TARGET_MODULES = ["query", "value"]
 
 
 class LoraTextEncoder(nn.Module):
-    def __init__(self, rank: int = LORA_RANK):
+    def __init__(self, rank: int = LORA_RANK, dropout: float = 0.0):
         super().__init__()
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         base_model = AutoModel.from_pretrained(MODEL_NAME)
@@ -29,7 +29,7 @@ class LoraTextEncoder(nn.Module):
             r=rank,
             lora_alpha=2 * rank,
             target_modules=LORA_TARGET_MODULES,
-            lora_dropout=0.0,
+            lora_dropout=dropout,
             bias="none",
         )
         self.model = get_peft_model(base_model, lora_config)

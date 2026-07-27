@@ -14,12 +14,20 @@ from mtg_rating.text_embeddings import EMBEDDING_DIM
 
 
 class CardRatingNetJoint(nn.Module):
-    def __init__(self, structured_dim: int, hidden_dim: int = 16, lora_rank: int = 4):
+    def __init__(
+        self,
+        structured_dim: int,
+        hidden_dim: int = 16,
+        lora_rank: int = 4,
+        lora_dropout: float = 0.0,
+        head_dropout: float = 0.0,
+    ):
         super().__init__()
-        self.text_encoder = LoraTextEncoder(rank=lora_rank)
+        self.text_encoder = LoraTextEncoder(rank=lora_rank, dropout=lora_dropout)
         self.head = nn.Sequential(
             nn.Linear(structured_dim + EMBEDDING_DIM, hidden_dim),
             nn.ReLU(),
+            nn.Dropout(head_dropout),
             nn.Linear(hidden_dim, 1),
         )
 

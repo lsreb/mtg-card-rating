@@ -30,9 +30,10 @@ from mtg_rating.ratings import RAW_SCORE_FORMULAS, apply_normalization, fit_norm
 from mtg_rating.train_multiset import pearson
 
 CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / "data" / "models" / "lora_joint"
-# Same test_names as before (first TEST_FRACTION names after the seeded shuffle) --
-# carving VAL_FRACTION out of what used to be "train" keeps prior test-only
-# results comparable. Val is used for both early stopping and any future
+# Back to 70/10/20 -- the 80/10/10 experiment came out slightly worse (confounded
+# by a smaller, noisier test set) and 70/10/20 is where the rank 2/4/8 comparison
+# was established, so it stays the reference split for further hyperparameter
+# tests like dropout. Val is used for early stopping and any future
 # hyperparameter choice; test is only ever looked at once, at the very end --
 # picking a checkpoint by its test-set score would bias that score optimistically
 # (the whole point of not reusing it for selection).
@@ -90,19 +91,29 @@ def evaluate(model: CardRatingNetJoint, records: list, targets: list):
     return mse, corr, preds
 
 
-def save_checkpoint(model: CardRatingNetJoint, mu: float, sigma: float, formula: str):
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+def save_checkpoint(model: CardRatingNetJoint, mu: float, sigma: float, formula: str, checkpoint_dir: Path = None):
+    checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
     # LoRA adapter alone (a few 10s of KB) rather than the full 22.7M-param frozen
     # base -- that's the whole point of only training rank-4 adapters.
-    model.text_encoder.model.save_pretrained(CHECKPOINT_DIR / "lora_adapter")
+    model.text_encoder.model.save_pretrained(checkpoint_dir / "lora_adapter")
     torch.save(
         {"head_state_dict": model.head.state_dict(), "mu": mu, "sigma": sigma, "formula": formula},
-        CHECKPOINT_DIR / "head.pt",
+        checkpoint_dir / "head.pt",
     )
-    print(f"[checkpoint] saved to {CHECKPOINT_DIR}")
+    print(f"[checkpoint] saved to {checkpoint_dir}")
 
 
-def main(set_codes: list = None, epochs: int = EPOCHS, seed: int = 0, save: bool = True, lora_rank: int = 4):
+def main(
+    set_codes: list = None,
+    epochs: int = EPOCHS,
+    seed: int = 0,
+    save: bool = True,
+    lora_rank: int = 4,
+    lora_dropout: float = 0.0,
+    head_dropout: float = 0.0,
+    checkpoint_dir: Path = None,
+):
     # `seed` controls only model init (LoRA adapter matrices, head) and epoch
     # shuffling -- the train/test partition always uses the fixed SPLIT_SEED, so
     # runs with different `seed` measure pure optimization variance on the same
@@ -133,7 +144,12 @@ def main(set_codes: list = None, epochs: int = EPOCHS, seed: int = 0, save: bool
     test_targets = [test_ratings[i] for i in range(len(test_records))]
 
     print(f"[device] {DEVICE}")
-    model = CardRatingNetJoint(structured_dim=len(train_records[0]["structured"]), lora_rank=lora_rank).to(DEVICE)
+    model = CardRatingNetJoint(
+        structured_dim=len(train_records[0]["structured"]),
+        lora_rank=lora_rank,
+        lora_dropout=lora_dropout,
+        head_dropout=head_dropout,
+    ).to(DEVICE)
     model.text_encoder.print_trainable_parameters()
     optimizer = torch.optim.Adam(
         [
@@ -195,8 +211,12 @@ def main(set_codes: list = None, epochs: int = EPOCHS, seed: int = 0, save: bool
     print(f"[test:{FORMULA}] n={len(test_targets)} MSE={test_mse:.3f} Pearson r={test_corr:.3f}")
 
     if save:
-        save_checkpoint(model, mu, sigma, FORMULA)
-    return model, preds, test_records, test_targets
+        save_checkpoint(model, mu, sigma, FORMULA, checkpoint_dir=checkpoint_dir)
+    # best_val_mse is returned so a multi-seed sweep can pick which checkpoint to
+    # keep by val score, not test score -- selecting on test would reintroduce
+    # the exact bias early stopping was written to avoid, just at the seed level
+    # instead of the epoch level.
+    return model, preds, test_records, test_targets, best_val_mse
 
 
 if __name__ == "__main__":
