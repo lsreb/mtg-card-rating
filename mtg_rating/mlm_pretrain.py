@@ -105,8 +105,22 @@ def run_epoch(model, tokenizer, collator, texts: list, batch_size: int, train: b
     return total_loss / total_tokens
 
 
-def main(seed: int = 0, epochs: int = EPOCHS):
+def save_pretrained_checkpoint(model, tokenizer, output_dir: Path):
+    # merge_and_unload() mutates the underlying layers in place and strips the
+    # peft wrapper -- done on a deepcopy so mid-training snapshots don't disturb
+    # the live model still being trained.
+    snapshot = copy.deepcopy(model)
+    merged = snapshot.merge_and_unload()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    merged.bert.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
+    print(f"[checkpoint] saved to {output_dir}")
+
+
+def main(seed: int = 0, epochs: int = EPOCHS, checkpoint_every: int = 0, checkpoint_root: Path = None):
     torch.manual_seed(seed)
+    if checkpoint_every:
+        checkpoint_root = checkpoint_root or OUTPUT_DIR.parent / "minilm_mtg_pretrained_checkpoints"
 
     cards = fetch_bulk_oracle_cards()
     texts = [c["oracle_text"] for c in cards]
@@ -146,6 +160,9 @@ def main(seed: int = 0, epochs: int = EPOCHS):
             if patience_counter >= PATIENCE:
                 print(f"[early stop] no val improvement for {PATIENCE} epochs, stopping at epoch {epoch}")
                 break
+
+        if checkpoint_every and (epoch + 1) % checkpoint_every == 0:
+            save_pretrained_checkpoint(model, tokenizer, checkpoint_root / f"epoch{epoch + 1}")
 
     model.load_state_dict(best_state)
 
