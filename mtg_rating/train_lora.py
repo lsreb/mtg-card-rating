@@ -27,6 +27,7 @@ from mtg_rating.features import structured_features
 from mtg_rating.model_joint import CardRatingNetJoint
 from mtg_rating.multiset import SET_CODES, build_dataset
 from mtg_rating.ratings import RAW_SCORE_FORMULAS, apply_normalization, fit_normalization
+from mtg_rating.set_context import CONTEXT_DIM, compute_set_context_vectors
 from mtg_rating.text_embeddings import MODEL_NAME
 from mtg_rating.train_multiset import pearson
 
@@ -79,6 +80,15 @@ def split_by_name_3way(records: list, val_fraction: float, test_fraction: float,
     return train_names, val_names, test_names
 
 
+def _set_context_tensor(batch_records: list):
+    # Records only carry "set_context" when main() was called with
+    # use_set_context=True -- None here means the model wasn't built with a
+    # set_context_dim either, so forward() just ignores it.
+    if "set_context" not in batch_records[0]:
+        return None
+    return torch.tensor([r["set_context"] for r in batch_records], dtype=torch.float32, device=DEVICE)
+
+
 def evaluate(model: CardRatingNetJoint, records: list, targets: list):
     model.eval()
     preds = []
@@ -86,7 +96,8 @@ def evaluate(model: CardRatingNetJoint, records: list, targets: list):
         for batch in iter_batches(list(zip(records, targets)), BATCH_SIZE):
             batch_records = [r for r, _ in batch]
             structured = torch.tensor([r["structured"] for r in batch_records], dtype=torch.float32, device=DEVICE)
-            preds.extend(model(structured, [r["oracle_text"] for r in batch_records]).tolist())
+            set_context = _set_context_tensor(batch_records)
+            preds.extend(model(structured, [r["oracle_text"] for r in batch_records], set_context).tolist())
     mse = sum((p - t) ** 2 for p, t in zip(preds, targets)) / len(targets)
     corr = pearson(preds, targets)
     return mse, corr, preds
@@ -117,6 +128,7 @@ def main(
     head_lr: float = HEAD_LR,
     formula: str = FORMULA,
     base_model_path=MODEL_NAME,
+    use_set_context: bool = False,
     checkpoint_dir: Path = None,
 ):
     # `seed` controls only model init (LoRA adapter matrices, head) and epoch
@@ -129,6 +141,15 @@ def main(
     for r in records:
         r["structured"] = structured_features(r["scryfall_card"])
         r["oracle_text"] = r["scryfall_card"].get("oracle_text", "")
+
+    if use_set_context:
+        # Fixed, non-trainable per-set mean (structured features + frozen MiniLM
+        # embedding) -- see set_context.py for why this and not live/trainable
+        # cross-card attention. No label information involved, so including
+        # test-split cards' text in their set's own average isn't leakage.
+        set_context_vectors = compute_set_context_vectors(records)
+        for r in records:
+            r["set_context"] = set_context_vectors[r["set_code"]]
 
     train_names, val_names, test_names = split_by_name_3way(records, VAL_FRACTION, TEST_FRACTION, SPLIT_SEED)
     train_records = [r for r in records if r["name"] in train_names]
@@ -155,6 +176,7 @@ def main(
         lora_dropout=lora_dropout,
         head_dropout=head_dropout,
         base_model_path=base_model_path,
+        set_context_dim=CONTEXT_DIM if use_set_context else 0,
     ).to(DEVICE)
     model.text_encoder.print_trainable_parameters()
     optimizer = torch.optim.Adam(
@@ -181,9 +203,10 @@ def main(
             batch_targets = [t for _, t in batch]
             structured = torch.tensor([r["structured"] for r in batch_records], dtype=torch.float32, device=DEVICE)
             target = torch.tensor(batch_targets, dtype=torch.float32, device=DEVICE)
+            set_context = _set_context_tensor(batch_records)
 
             optimizer.zero_grad()
-            pred = model(structured, [r["oracle_text"] for r in batch_records])
+            pred = model(structured, [r["oracle_text"] for r in batch_records], set_context)
             loss = loss_fn(pred, target)
             loss.backward()
             optimizer.step()

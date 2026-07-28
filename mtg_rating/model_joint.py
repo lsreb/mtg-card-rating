@@ -22,19 +22,23 @@ class CardRatingNetJoint(nn.Module):
         lora_dropout: float = 0.0,
         head_dropout: float = 0.0,
         base_model_path=MODEL_NAME,
+        set_context_dim: int = 0,
     ):
         super().__init__()
         self.text_encoder = LoraTextEncoder(rank=lora_rank, dropout=lora_dropout, base_model_path=base_model_path)
         self.head = nn.Sequential(
-            nn.Linear(structured_dim + EMBEDDING_DIM, hidden_dim),
+            nn.Linear(structured_dim + EMBEDDING_DIM + set_context_dim, hidden_dim),
             nn.GELU(),
             nn.Dropout(head_dropout),
             nn.Linear(hidden_dim, 1),
         )
 
-    def forward(self, structured: torch.Tensor, texts: list) -> torch.Tensor:
+    def forward(self, structured: torch.Tensor, texts: list, set_context: torch.Tensor = None) -> torch.Tensor:
         text_embedding = self.text_encoder(texts)
-        combined = torch.cat([structured, text_embedding], dim=-1)
+        parts = [structured, text_embedding]
+        if set_context is not None:
+            parts.append(set_context)
+        combined = torch.cat(parts, dim=-1)
         return self.head(combined).squeeze(-1)
 
     def trainable_parameters(self):
