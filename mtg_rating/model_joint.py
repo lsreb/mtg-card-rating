@@ -23,6 +23,7 @@ class CardRatingNetJoint(nn.Module):
         head_dropout: float = 0.0,
         base_model_path=MODEL_NAME,
         set_context_dim: int = 0,
+        output_dim: int = 1,
     ):
         super().__init__()
         # [16] reproduces the original single-hidden-layer head exactly. A
@@ -32,6 +33,7 @@ class CardRatingNetJoint(nn.Module):
         # clearly justified when the input was smaller and there was no set
         # context to help combine.
         hidden_dims = hidden_dims or [16]
+        self.output_dim = output_dim
         self.text_encoder = LoraTextEncoder(rank=lora_rank, dropout=lora_dropout, base_model_path=base_model_path)
 
         layers = []
@@ -39,7 +41,7 @@ class CardRatingNetJoint(nn.Module):
         for dim in hidden_dims:
             layers += [nn.Linear(prev_dim, dim), nn.GELU(), nn.Dropout(head_dropout)]
             prev_dim = dim
-        layers.append(nn.Linear(prev_dim, 1))
+        layers.append(nn.Linear(prev_dim, output_dim))
         self.head = nn.Sequential(*layers)
 
     def forward(self, structured: torch.Tensor, texts: list, set_context: torch.Tensor = None) -> torch.Tensor:
@@ -48,7 +50,11 @@ class CardRatingNetJoint(nn.Module):
         if set_context is not None:
             parts.append(set_context)
         combined = torch.cat(parts, dim=-1)
-        return self.head(combined).squeeze(-1)
+        out = self.head(combined)
+        # output_dim=1 (the original, single-target case): squeeze to (batch,)
+        # so nothing downstream needs to special-case it. output_dim>1 (e.g.
+        # jointly predicting IIH and GP WR): keep (batch, output_dim) as-is.
+        return out.squeeze(-1) if self.output_dim == 1 else out
 
     def trainable_parameters(self):
         return list(self.text_encoder.trainable_parameters()) + list(self.head.parameters())

@@ -77,5 +77,5 @@ Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly co
 -Plus de couches dans le MLP ? > pas très concluant pour le moment
 -Plus d'epochs de pretraining ?
 -Un mécanisme d'attention pour mieux intégrer le contexte ?
--Apprendre GIH ?
+-Apprendre GP ? > sortie couple, pas vraiment de gain ni de perte prouvée.
 -Lora pretrain 64?

@@ -44,6 +44,7 @@ RAW_SCORE_FORMULAS = {
     "gih_10iih": lambda m: m["gih_wr"] + 10 * m["iih"],
     "gih_15iih": lambda m: m["gih_wr"] + 15 * m["iih"],
     "iih_only": lambda m: m["iih"],
+    "gp_wr_only": lambda m: m["gp_wr"],
 }
 
 

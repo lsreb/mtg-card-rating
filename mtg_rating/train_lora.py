@@ -98,6 +98,25 @@ def evaluate(model: CardRatingNetJoint, records: list, targets: list):
             structured = torch.tensor([r["structured"] for r in batch_records], dtype=torch.float32, device=DEVICE)
             set_context = _set_context_tensor(batch_records)
             preds.extend(model(structured, [r["oracle_text"] for r in batch_records], set_context).tolist())
+
+    if isinstance(targets[0], tuple):
+        # Dual-target mode (see `second_formula`): preds/targets are lists of
+        # same-length tuples. `mse` (first return value) is the combined,
+        # equally-weighted MSE across both components -- used for early
+        # stopping/model selection exactly like the single-target case, so
+        # that codepath doesn't need to know which mode it's in. `extra` is a
+        # per-component (mse, pearson_r) breakdown instead of a single corr.
+        n_targets = len(targets)
+        n_outputs = len(targets[0])
+        mse = sum(sum((p_i - t_i) ** 2 for p_i, t_i in zip(p, t)) for p, t in zip(preds, targets)) / (n_targets * n_outputs)
+        extra = []
+        for k in range(n_outputs):
+            preds_k = [p[k] for p in preds]
+            targets_k = [t[k] for t in targets]
+            mse_k = sum((p - t) ** 2 for p, t in zip(preds_k, targets_k)) / n_targets
+            extra.append((mse_k, pearson(preds_k, targets_k)))
+        return mse, extra, preds
+
     mse = sum((p - t) ** 2 for p, t in zip(preds, targets)) / len(targets)
     corr = pearson(preds, targets)
     return mse, corr, preds
@@ -111,6 +130,9 @@ def save_checkpoint(
     checkpoint_dir: Path = None,
     base_model_path=MODEL_NAME,
     use_set_context: bool = False,
+    second_formula: str = None,
+    mu2: float = None,
+    sigma2: float = None,
 ):
     checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -130,6 +152,11 @@ def save_checkpoint(
             # dimensions or load the wrong base weights.
             "base_model_path": str(base_model_path),
             "use_set_context": use_set_context,
+            # None unless training a dual (formula, second_formula) output --
+            # each target has its own independent mu/sigma, fit separately.
+            "second_formula": second_formula,
+            "mu2": mu2,
+            "sigma2": sigma2,
         },
         checkpoint_dir / "head.pt",
     )
@@ -150,6 +177,7 @@ def main(
     base_model_path=MODEL_NAME,
     use_set_context: bool = False,
     hidden_dims: list = None,
+    second_formula: str = None,
     checkpoint_dir: Path = None,
 ):
     # `seed` controls only model init (LoRA adapter matrices, head) and epoch
@@ -190,6 +218,22 @@ def main(
     val_targets = [val_ratings[i] for i in range(len(val_records))]
     test_targets = [test_ratings[i] for i in range(len(test_records))]
 
+    mu2 = sigma2 = None
+    if second_formula:
+        # Independent mu/sigma for the second target -- IIH and GP WR live on
+        # different raw scales, each fit on train only, same as the primary.
+        fn2 = RAW_SCORE_FORMULAS[second_formula]
+        train_raw2 = {i: fn2(r) for i, r in enumerate(train_records)}
+        val_raw2 = {i: fn2(r) for i, r in enumerate(val_records)}
+        test_raw2 = {i: fn2(r) for i, r in enumerate(test_records)}
+        mu2, sigma2 = fit_normalization(train_raw2)
+        train_ratings2 = apply_normalization(train_raw2, mu2, sigma2)
+        val_ratings2 = apply_normalization(val_raw2, mu2, sigma2)
+        test_ratings2 = apply_normalization(test_raw2, mu2, sigma2)
+        train_targets = [(train_targets[i], train_ratings2[i]) for i in range(len(train_records))]
+        val_targets = [(val_targets[i], val_ratings2[i]) for i in range(len(val_records))]
+        test_targets = [(test_targets[i], test_ratings2[i]) for i in range(len(test_records))]
+
     print(f"[device] {DEVICE}")
     model = CardRatingNetJoint(
         structured_dim=len(train_records[0]["structured"]),
@@ -199,6 +243,7 @@ def main(
         head_dropout=head_dropout,
         base_model_path=base_model_path,
         set_context_dim=CONTEXT_DIM if use_set_context else 0,
+        output_dim=2 if second_formula else 1,
     ).to(DEVICE)
     model.text_encoder.print_trainable_parameters()
     optimizer = torch.optim.Adam(
@@ -239,8 +284,15 @@ def main(
         # checkpoint that actually generalizes best, instead of whatever epoch
         # training happened to stop at -- the 40-epoch/3-seed sweep showed the
         # final epoch can be meaningfully worse than the best one reached mid-run.
-        val_mse, val_corr, _ = evaluate(model, val_records, val_targets)
-        print(f"[epoch {epoch}] train MSE={train_mse:.3f}  val MSE={val_mse:.3f} Pearson r={val_corr:.3f}")
+        val_mse, val_extra, _ = evaluate(model, val_records, val_targets)
+        if second_formula:
+            (mse1, corr1), (mse2, corr2) = val_extra
+            print(
+                f"[epoch {epoch}] train MSE={train_mse:.3f}  val MSE={val_mse:.3f} "
+                f"({formula}: MSE={mse1:.3f} r={corr1:.3f} | {second_formula}: MSE={mse2:.3f} r={corr2:.3f})"
+            )
+        else:
+            print(f"[epoch {epoch}] train MSE={train_mse:.3f}  val MSE={val_mse:.3f} Pearson r={val_extra:.3f}")
 
         if val_mse < best_val_mse - MIN_DELTA:
             best_val_mse = val_mse
@@ -258,13 +310,21 @@ def main(
     # count included) has already been made from train+val alone -- otherwise
     # the reported number would be optimistically biased by having picked the
     # checkpoint that happens to look best on this specific test set.
-    test_mse, test_corr, preds = evaluate(model, test_records, test_targets)
-    print(f"[test:{formula}] n={len(test_targets)} MSE={test_mse:.3f} Pearson r={test_corr:.3f}")
+    test_mse, test_extra, preds = evaluate(model, test_records, test_targets)
+    if second_formula:
+        (mse1, corr1), (mse2, corr2) = test_extra
+        print(
+            f"[test] n={len(test_targets)} combined MSE={test_mse:.3f} "
+            f"({formula}: MSE={mse1:.3f} r={corr1:.3f} | {second_formula}: MSE={mse2:.3f} r={corr2:.3f})"
+        )
+    else:
+        print(f"[test:{formula}] n={len(test_targets)} MSE={test_mse:.3f} Pearson r={test_extra:.3f}")
 
     if save:
         save_checkpoint(
             model, mu, sigma, formula, checkpoint_dir=checkpoint_dir,
             base_model_path=base_model_path, use_set_context=use_set_context,
+            second_formula=second_formula, mu2=mu2, sigma2=sigma2,
         )
     # best_val_mse is returned so a multi-seed sweep can pick which checkpoint to
     # keep by val score, not test score -- selecting on test would reintroduce
