@@ -74,3 +74,8 @@ Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly co
 -Remind that we settled for IIH as a target, so that we could have a rating that would not depend on the set context, as much as possible.
 -However our final goal is still to rate the cards depending on the context of their set.
 -A possibility could be to change the output from "IIH" to the couple "(IIH, GP WR)". GP WR or GIH WR should be about the same, as their difference is somewhat proportional to IIH. This could make IIH harder to learn. The network may need extra help (attention?) to work even better, use the "set code" feature.
+-Plus de couches dans le MLP ? > pas très concluant pour le moment
+-Plus d'epochs de pretraining ?
+-Un mécanisme d'attention pour mieux intégrer le contexte ?
+-Apprendre GIH ?
+-Lora pretrain 64?

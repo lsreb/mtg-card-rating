@@ -149,6 +149,7 @@ def main(
     formula: str = FORMULA,
     base_model_path=MODEL_NAME,
     use_set_context: bool = False,
+    hidden_dims: list = None,
     checkpoint_dir: Path = None,
 ):
     # `seed` controls only model init (LoRA adapter matrices, head) and epoch
@@ -192,6 +193,7 @@ def main(
     print(f"[device] {DEVICE}")
     model = CardRatingNetJoint(
         structured_dim=len(train_records[0]["structured"]),
+        hidden_dims=hidden_dims,
         lora_rank=lora_rank,
         lora_dropout=lora_dropout,
         head_dropout=head_dropout,

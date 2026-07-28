@@ -17,7 +17,7 @@ class CardRatingNetJoint(nn.Module):
     def __init__(
         self,
         structured_dim: int,
-        hidden_dim: int = 16,
+        hidden_dims: list = None,
         lora_rank: int = LORA_RANK,
         lora_dropout: float = 0.0,
         head_dropout: float = 0.0,
@@ -25,13 +25,22 @@ class CardRatingNetJoint(nn.Module):
         set_context_dim: int = 0,
     ):
         super().__init__()
+        # [16] reproduces the original single-hidden-layer head exactly. A
+        # deeper head (e.g. [64, 16]) is worth trying now that set_context
+        # doubled the input width (398 -> 796) -- the single-layer head
+        # compresses that in one big step; more capacity here wasn't as
+        # clearly justified when the input was smaller and there was no set
+        # context to help combine.
+        hidden_dims = hidden_dims or [16]
         self.text_encoder = LoraTextEncoder(rank=lora_rank, dropout=lora_dropout, base_model_path=base_model_path)
-        self.head = nn.Sequential(
-            nn.Linear(structured_dim + EMBEDDING_DIM + set_context_dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(head_dropout),
-            nn.Linear(hidden_dim, 1),
-        )
+
+        layers = []
+        prev_dim = structured_dim + EMBEDDING_DIM + set_context_dim
+        for dim in hidden_dims:
+            layers += [nn.Linear(prev_dim, dim), nn.GELU(), nn.Dropout(head_dropout)]
+            prev_dim = dim
+        layers.append(nn.Linear(prev_dim, 1))
+        self.head = nn.Sequential(*layers)
 
     def forward(self, structured: torch.Tensor, texts: list, set_context: torch.Tensor = None) -> torch.Tensor:
         text_embedding = self.text_encoder(texts)
