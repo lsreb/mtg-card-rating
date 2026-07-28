@@ -63,8 +63,22 @@ def split_texts(texts: list, val_fraction: float, seed: int):
     return shuffled[n_val:], shuffled[:n_val]
 
 
-def build_model(tokenizer):
+def build_model(tokenizer, full_finetune: bool = False):
     base_model = AutoModelForMaskedLM.from_pretrained(MODEL_NAME)
+    if full_finetune:
+        # No peft wrapping at all -- every one of the 34.9M params (base
+        # encoder + the freshly-initialized MLM head) is trainable. Comparison
+        # point only, per project discussion: full fine-tuning on this
+        # (relatively small, ~1-1.5M token) corpus was rejected as the default
+        # approach due to overfitting/catastrophic-forgetting risk, but a
+        # capped (<=7 epoch) run costs about the same as the LoRA runs (same
+        # forward/backward graph either way) and directly tests that risk
+        # empirically instead of just arguing it.
+        n_trainable = sum(p.numel() for p in base_model.parameters() if p.requires_grad)
+        n_total = sum(p.numel() for p in base_model.parameters())
+        print(f"trainable params: {n_trainable:,} || all params: {n_total:,} || trainable%: {100*n_trainable/n_total:.4f}")
+        return base_model
+
     lora_config = LoraConfig(
         r=LORA_RANK,
         lora_alpha=2 * LORA_RANK,
@@ -105,20 +119,29 @@ def run_epoch(model, tokenizer, collator, texts: list, batch_size: int, train: b
     return total_loss / total_tokens
 
 
-def save_pretrained_checkpoint(model, tokenizer, output_dir: Path):
+def save_pretrained_checkpoint(model, tokenizer, output_dir: Path, full_finetune: bool = False):
     # merge_and_unload() mutates the underlying layers in place and strips the
     # peft wrapper -- done on a deepcopy so mid-training snapshots don't disturb
-    # the live model still being trained.
+    # the live model still being trained. full_finetune has no peft wrapper to
+    # merge/strip, so the deepcopy is saved directly.
     snapshot = copy.deepcopy(model)
-    merged = snapshot.merge_and_unload()
+    bert = snapshot.bert if full_finetune else snapshot.merge_and_unload().bert
     output_dir.mkdir(parents=True, exist_ok=True)
-    merged.bert.save_pretrained(output_dir)
+    bert.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
     print(f"[checkpoint] saved to {output_dir}")
 
 
-def main(seed: int = 0, epochs: int = EPOCHS, checkpoint_every: int = 0, checkpoint_root: Path = None):
+def main(
+    seed: int = 0,
+    epochs: int = EPOCHS,
+    checkpoint_every: int = 0,
+    checkpoint_root: Path = None,
+    full_finetune: bool = False,
+    output_dir: Path = None,
+):
     torch.manual_seed(seed)
+    output_dir = output_dir or OUTPUT_DIR
     if checkpoint_every:
         checkpoint_root = checkpoint_root or OUTPUT_DIR.parent / "minilm_mtg_pretrained_checkpoints"
 
@@ -130,7 +153,7 @@ def main(seed: int = 0, epochs: int = EPOCHS, checkpoint_every: int = 0, checkpo
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=True, mlm_probability=MLM_PROBABILITY)
 
-    model = build_model(tokenizer).to(DEVICE)
+    model = build_model(tokenizer, full_finetune=full_finetune).to(DEVICE)
     trainable = [p for p in model.parameters() if p.requires_grad]
     # Same differential-LR reasoning as the rating fine-tune (lower for the
     # LoRA-adapted attention weights, higher for the freshly-initialized MLM
@@ -162,18 +185,19 @@ def main(seed: int = 0, epochs: int = EPOCHS, checkpoint_every: int = 0, checkpo
                 break
 
         if checkpoint_every and (epoch + 1) % checkpoint_every == 0:
-            save_pretrained_checkpoint(model, tokenizer, checkpoint_root / f"epoch{epoch + 1}")
+            save_pretrained_checkpoint(model, tokenizer, checkpoint_root / f"epoch{epoch + 1}", full_finetune=full_finetune)
 
     model.load_state_dict(best_state)
 
-    merged = model.merge_and_unload()
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    # merged is a BertForMaskedLM (children: "bert", "cls") -- only the "bert"
-    # core encoder is saved, so this loads as a drop-in AutoModel replacement in
-    # a fresh LoraTextEncoder later; the MLM head ("cls") isn't needed downstream.
-    merged.bert.save_pretrained(OUTPUT_DIR)
-    tokenizer.save_pretrained(OUTPUT_DIR)
-    print(f"[saved] MTG-adapted MiniLM base saved to {OUTPUT_DIR}")
+    # bert is a BertForMaskedLM (children: "bert", "cls") either way -- only the
+    # "bert" core encoder is saved, so this loads as a drop-in AutoModel
+    # replacement in a fresh LoraTextEncoder later; the MLM head ("cls") isn't
+    # needed downstream. full_finetune has no peft wrapper to merge/strip.
+    bert = model.bert if full_finetune else model.merge_and_unload().bert
+    output_dir.mkdir(parents=True, exist_ok=True)
+    bert.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
+    print(f"[saved] MTG-adapted MiniLM base saved to {output_dir}")
     return best_val_loss
 
 
