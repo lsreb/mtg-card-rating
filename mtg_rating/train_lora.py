@@ -103,14 +103,34 @@ def evaluate(model: CardRatingNetJoint, records: list, targets: list):
     return mse, corr, preds
 
 
-def save_checkpoint(model: CardRatingNetJoint, mu: float, sigma: float, formula: str, checkpoint_dir: Path = None):
+def save_checkpoint(
+    model: CardRatingNetJoint,
+    mu: float,
+    sigma: float,
+    formula: str,
+    checkpoint_dir: Path = None,
+    base_model_path=MODEL_NAME,
+    use_set_context: bool = False,
+):
     checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     # LoRA adapter alone (a few 10s of KB) rather than the full 22.7M-param frozen
     # base -- that's the whole point of only training rank-4 adapters.
     model.text_encoder.model.save_pretrained(checkpoint_dir / "lora_adapter")
     torch.save(
-        {"head_state_dict": model.head.state_dict(), "mu": mu, "sigma": sigma, "formula": formula},
+        {
+            "head_state_dict": model.head.state_dict(),
+            "mu": mu,
+            "sigma": sigma,
+            "formula": formula,
+            # Recorded so a later reload knows which base encoder the adapter
+            # was trained on top of, and whether the head expects a
+            # concatenated set-context vector -- the adapter/head files alone
+            # don't carry this, and guessing wrong would silently mismatch
+            # dimensions or load the wrong base weights.
+            "base_model_path": str(base_model_path),
+            "use_set_context": use_set_context,
+        },
         checkpoint_dir / "head.pt",
     )
     print(f"[checkpoint] saved to {checkpoint_dir}")
@@ -240,7 +260,10 @@ def main(
     print(f"[test:{formula}] n={len(test_targets)} MSE={test_mse:.3f} Pearson r={test_corr:.3f}")
 
     if save:
-        save_checkpoint(model, mu, sigma, formula, checkpoint_dir=checkpoint_dir)
+        save_checkpoint(
+            model, mu, sigma, formula, checkpoint_dir=checkpoint_dir,
+            base_model_path=base_model_path, use_set_context=use_set_context,
+        )
     # best_val_mse is returned so a multi-seed sweep can pick which checkpoint to
     # keep by val score, not test score -- selecting on test would reintroduce
     # the exact bias early stopping was written to avoid, just at the seed level
