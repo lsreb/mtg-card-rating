@@ -8,6 +8,7 @@ Je mets aussi des observations diverses et variées
 -GP WR vs GIH WR?
 -IIH on its own is easier to learn as it removes the dependency on the set. However it may not be that useful to rate the actual strength of multicolored cards or buildaround cards.
 -In order to properly train with the goal to evaluate a whole set, the whole set GIH may be the target...but we would have very very little data in this case.
+-In MSH, B is so bad that cards somehow have a decent IIH because they have a terrible GP
 
 ## 1) Objectif
 
@@ -80,3 +81,4 @@ Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly co
 -Apprendre GP ? > sortie couple, pas vraiment de gain ni de perte prouvée sur Lora32 pretrain. Good with Lora64, mandatory even.
 -Lora pretrain 64? > works well to predict the couple IIH GP, not IIH on its own.
 -Open question: compute the mean IIH of commons and uncommons, or a similar metric, for a set, compare it to the color winrate, its correlation.
+-Display: display the ratings result as a list by color, that can be opened in html, strong cards to weak cards.
