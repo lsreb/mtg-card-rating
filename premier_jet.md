@@ -77,5 +77,6 @@ Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly co
 -Plus de couches dans le MLP ? > pas très concluant pour le moment
 -Plus d'epochs de pretraining ?
 -Un mécanisme d'attention pour mieux intégrer le contexte ?
--Apprendre GP ? > sortie couple, pas vraiment de gain ni de perte prouvée.
--Lora pretrain 64?
+-Apprendre GP ? > sortie couple, pas vraiment de gain ni de perte prouvée sur Lora32 pretrain. Good with Lora64, mandatory even.
+-Lora pretrain 64? > works well to predict the couple IIH GP, not IIH on its own.
+-Open question: compute the mean IIH of commons and uncommons, or a similar metric, for a set, compare it to the color winrate, its correlation.
