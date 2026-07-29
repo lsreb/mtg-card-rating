@@ -70,3 +70,81 @@ class CardRatingNetJoint(nn.Module):
 
     def trainable_parameters(self):
         return list(self.text_encoder.trainable_parameters()) + list(self.head.parameters())
+
+
+class ColorAttentionContext(nn.Module):
+    """Small cross-attention block used by train_color_context.py: a card's own
+    (structured+text) vector as the query, the commons/uncommons sharing its
+    primary color (see color_context.py) as keys/values. Kept deliberately
+    small -- one linear projection down to context_dim, one attention layer, a
+    residual -- both to stay "light" per the project's own finding that added
+    capacity without added information tends not to help here, and because a
+    smaller function class is less able to overfit the handful of distinct
+    color-pool "environments" (~156 set x color buckets) it's trained on. See
+    color_context.py's docstring for the generalization caveat this implies.
+    """
+
+    def __init__(self, input_dim: int, context_dim: int = 32, num_heads: int = 4, dropout: float = 0.0):
+        super().__init__()
+        self.proj = nn.Linear(input_dim, context_dim)
+        self.attn = nn.MultiheadAttention(context_dim, num_heads, dropout=dropout, batch_first=True)
+        self.context_dim = context_dim
+
+    def forward(self, combined: torch.Tensor, informant_local_idx: list) -> torch.Tensor:
+        # combined: (n, input_dim), every card in one (set, color) bucket, in
+        # query order. informant_local_idx: which rows of `combined` are
+        # allowed as keys/values (the common/uncommon subset) -- falls back to
+        # the whole bucket if it happens to have zero c/u members.
+        proj = self.proj(combined)
+        kv = proj[informant_local_idx] if informant_local_idx else proj
+        attn_out, _ = self.attn(proj.unsqueeze(0), kv.unsqueeze(0), kv.unsqueeze(0))
+        return attn_out.squeeze(0) + proj
+
+    def trainable_parameters(self):
+        return list(self.parameters())
+
+
+class _GradientReversalFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, lambda_):
+        ctx.lambda_ = lambda_
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return -ctx.lambda_ * grad_output, None
+
+
+class GradientReversalLayer(nn.Module):
+    """Identity in the forward pass; negates (and scales by `lambda_`) whatever
+    gradient flows back through it. Used by train_color_context.py's DANN mode
+    to push ColorAttentionContext's output towards not encoding which set a
+    card came from -- see that module for why set-identity is a real shortcut
+    risk given only ~18-26 distinct sets. `lambda_` is meant to be ramped up
+    over training (0 -> 1), not held constant -- adversarial pressure against
+    an undertrained encoder early on is a known destabilizer."""
+
+    def __init__(self, lambda_: float = 1.0):
+        super().__init__()
+        self.lambda_ = lambda_
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return _GradientReversalFunction.apply(x, self.lambda_)
+
+
+class DomainClassifier(nn.Module):
+    """Small MLP predicting which (training) set a context vector came from --
+    paired with GradientReversalLayer ahead of it, its own weights train
+    normally to classify well, while the *encoder* upstream of the GRL gets
+    pushed the opposite direction (see GradientReversalLayer's docstring)."""
+
+    def __init__(self, context_dim: int, num_domains: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(context_dim, context_dim),
+            nn.GELU(),
+            nn.Linear(context_dim, num_domains),
+        )
+
+    def forward(self, context: torch.Tensor) -> torch.Tensor:
+        return self.net(context)

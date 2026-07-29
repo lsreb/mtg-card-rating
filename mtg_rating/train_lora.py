@@ -84,6 +84,24 @@ def split_by_name_3way(records: list, val_fraction: float, test_fraction: float,
     return train_names, val_names, test_names
 
 
+def split_by_set_3way(records: list, val_fraction: float, test_fraction: float, seed: int):
+    """Entire sets held out, not just card names within a shared pool -- used
+    by train_color_context.py as the honest generalization check for its
+    trainable cross-card mechanism (see color_context.py), and here so a
+    plain/set_context run can be compared against it on the exact same split
+    -- isolates whether a by-set split is just harder for any model, versus a
+    specific problem with a trainable cross-card mechanism."""
+    set_codes = sorted({r["set_code"] for r in records})
+    rng = random.Random(seed)
+    rng.shuffle(set_codes)
+    n_test = max(1, round(len(set_codes) * test_fraction))
+    n_val = max(1, round(len(set_codes) * val_fraction))
+    test_sets = set(set_codes[:n_test])
+    val_sets = set(set_codes[n_test : n_test + n_val])
+    train_sets = set(set_codes[n_test + n_val :])
+    return train_sets, val_sets, test_sets
+
+
 def _set_context_tensor(batch_records: list):
     # Records only carry "set_context" when main() was called with
     # use_set_context=True -- None here means the model wasn't built with a
@@ -93,16 +111,10 @@ def _set_context_tensor(batch_records: list):
     return torch.tensor([r["set_context"] for r in batch_records], dtype=torch.float32, device=DEVICE)
 
 
-def evaluate(model: CardRatingNetJoint, records: list, targets: list):
-    model.eval()
-    preds = []
-    with torch.no_grad():
-        for batch in iter_batches(list(zip(records, targets)), BATCH_SIZE):
-            batch_records = [r for r, _ in batch]
-            structured = torch.tensor([r["structured"] for r in batch_records], dtype=torch.float32, device=DEVICE)
-            set_context = _set_context_tensor(batch_records)
-            preds.extend(model(structured, [r["oracle_text"] for r in batch_records], set_context).tolist())
-
+def score_predictions(preds: list, targets: list):
+    """Shared by evaluate() below and train_color_context.py's own evaluate()
+    -- generic over preds/targets alone, no model/record dependency, so both
+    training loops report results the same way."""
     if isinstance(targets[0], tuple):
         # Dual-target mode (see `second_formula`): preds/targets are lists of
         # same-length tuples. `mse` (first return value) is the combined,
@@ -119,11 +131,25 @@ def evaluate(model: CardRatingNetJoint, records: list, targets: list):
             targets_k = [t[k] for t in targets]
             mse_k = sum((p - t) ** 2 for p, t in zip(preds_k, targets_k)) / n_targets
             extra.append((mse_k, pearson(preds_k, targets_k)))
-        return mse, extra, preds
+        return mse, extra
 
     mse = sum((p - t) ** 2 for p, t in zip(preds, targets)) / len(targets)
     corr = pearson(preds, targets)
-    return mse, corr, preds
+    return mse, corr
+
+
+def evaluate(model: CardRatingNetJoint, records: list, targets: list):
+    model.eval()
+    preds = []
+    with torch.no_grad():
+        for batch in iter_batches(list(zip(records, targets)), BATCH_SIZE):
+            batch_records = [r for r, _ in batch]
+            structured = torch.tensor([r["structured"] for r in batch_records], dtype=torch.float32, device=DEVICE)
+            set_context = _set_context_tensor(batch_records)
+            preds.extend(model(structured, [r["oracle_text"] for r in batch_records], set_context).tolist())
+
+    mse, extra = score_predictions(preds, targets)
+    return mse, extra, preds
 
 
 def save_checkpoint(
@@ -186,6 +212,7 @@ def main(
     extra_formulas: list = None,
     raw_formulas: list = None,
     checkpoint_dir: Path = None,
+    split_mode: str = "name",  # "name" (default, every prior result in this project) or "set" (honesty check)
 ):
     extra_formulas = extra_formulas or []
     # Formulas in raw_formulas (must be a subset of extra_formulas) skip the
@@ -225,10 +252,16 @@ def main(
     all_formulas = [formula] + extra_formulas
     records = [r for r in records if all(RAW_SCORE_FORMULAS[f](r) is not None for f in all_formulas)]
 
-    train_names, val_names, test_names = split_by_name_3way(records, VAL_FRACTION, TEST_FRACTION, SPLIT_SEED)
-    train_records = [r for r in records if r["name"] in train_names]
-    val_records = [r for r in records if r["name"] in val_names]
-    test_records = [r for r in records if r["name"] in test_names]
+    if split_mode == "set":
+        train_sel, val_sel, test_sel = split_by_set_3way(records, VAL_FRACTION, TEST_FRACTION, SPLIT_SEED)
+        train_records = [r for r in records if r["set_code"] in train_sel]
+        val_records = [r for r in records if r["set_code"] in val_sel]
+        test_records = [r for r in records if r["set_code"] in test_sel]
+    else:
+        train_sel, val_sel, test_sel = split_by_name_3way(records, VAL_FRACTION, TEST_FRACTION, SPLIT_SEED)
+        train_records = [r for r in records if r["name"] in train_sel]
+        val_records = [r for r in records if r["name"] in val_sel]
+        test_records = [r for r in records if r["name"] in test_sel]
     print(f"[split] {len(train_records)} train rows, {len(val_records)} val rows, {len(test_records)} test rows")
 
     fn = RAW_SCORE_FORMULAS[formula]
