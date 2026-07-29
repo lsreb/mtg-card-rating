@@ -182,6 +182,7 @@ def main(
     base_model_path=MODEL_NAME,
     use_set_context: bool = False,
     hidden_dims: list = None,
+    layer_norm: bool = False,
     extra_formulas: list = None,
     raw_formulas: list = None,
     checkpoint_dir: Path = None,
@@ -276,6 +277,7 @@ def main(
     model = CardRatingNetJoint(
         structured_dim=len(train_records[0]["structured"]),
         hidden_dims=hidden_dims,
+        layer_norm=layer_norm,
         lora_rank=lora_rank,
         lora_dropout=lora_dropout,
         head_dropout=head_dropout,

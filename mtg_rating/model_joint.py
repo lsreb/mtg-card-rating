@@ -24,6 +24,7 @@ class CardRatingNetJoint(nn.Module):
         base_model_path=MODEL_NAME,
         set_context_dim: int = 0,
         output_dim: int = 1,
+        layer_norm: bool = False,
     ):
         super().__init__()
         # [16] reproduces the original single-hidden-layer head exactly. A
@@ -36,11 +37,22 @@ class CardRatingNetJoint(nn.Module):
         self.output_dim = output_dim
         self.text_encoder = LoraTextEncoder(rank=lora_rank, dropout=lora_dropout, base_model_path=base_model_path)
 
+        # layer_norm=False (default) keeps hidden_dims=[16] byte-for-byte the
+        # original head -- Pre-LN (LayerNorm immediately before each Linear,
+        # same convention as CardNetBig/SharedTrunkActorCritic in the sibling
+        # Coinche RL project) is opt-in, meant for deeper heads like
+        # [256, 64, 16] where a deeper unnormalized MLP is more prone to
+        # unstable training (the earlier [64, 16] attempt without LayerNorm
+        # already showed ~8x higher seed-to-seed val variance).
         layers = []
         prev_dim = structured_dim + EMBEDDING_DIM + set_context_dim
         for dim in hidden_dims:
+            if layer_norm:
+                layers.append(nn.LayerNorm(prev_dim))
             layers += [nn.Linear(prev_dim, dim), nn.GELU(), nn.Dropout(head_dropout)]
             prev_dim = dim
+        if layer_norm:
+            layers.append(nn.LayerNorm(prev_dim))
         layers.append(nn.Linear(prev_dim, output_dim))
         self.head = nn.Sequential(*layers)
 
