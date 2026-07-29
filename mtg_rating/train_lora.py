@@ -63,6 +63,10 @@ HEAD_LR = 1e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def _as_tuple(value):
+    return value if isinstance(value, tuple) else (value,)
+
+
 def iter_batches(pairs: list, batch_size: int):
     for start in range(0, len(pairs), batch_size):
         yield pairs[start : start + batch_size]
@@ -130,9 +134,9 @@ def save_checkpoint(
     checkpoint_dir: Path = None,
     base_model_path=MODEL_NAME,
     use_set_context: bool = False,
-    second_formula: str = None,
-    mu2: float = None,
-    sigma2: float = None,
+    extra_formulas: list = None,
+    extra_mus: list = None,
+    extra_sigmas: list = None,
 ):
     checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -152,11 +156,12 @@ def save_checkpoint(
             # dimensions or load the wrong base weights.
             "base_model_path": str(base_model_path),
             "use_set_context": use_set_context,
-            # None unless training a dual (formula, second_formula) output --
-            # each target has its own independent mu/sigma, fit separately.
-            "second_formula": second_formula,
-            "mu2": mu2,
-            "sigma2": sigma2,
+            # Empty unless training more than one output (see `extra_formulas`
+            # on main()) -- each extra target has its own independent mu/sigma,
+            # fit separately, in the same order as extra_formulas.
+            "extra_formulas": extra_formulas or [],
+            "extra_mus": extra_mus or [],
+            "extra_sigmas": extra_sigmas or [],
         },
         checkpoint_dir / "head.pt",
     )
@@ -177,9 +182,10 @@ def main(
     base_model_path=MODEL_NAME,
     use_set_context: bool = False,
     hidden_dims: list = None,
-    second_formula: str = None,
+    extra_formulas: list = None,
     checkpoint_dir: Path = None,
 ):
+    extra_formulas = extra_formulas or []
     # `seed` controls only model init (LoRA adapter matrices, head) and epoch
     # shuffling -- the train/test partition always uses the fixed SPLIT_SEED, so
     # runs with different `seed` measure pure optimization variance on the same
@@ -200,6 +206,13 @@ def main(
         for r in records:
             r["set_context"] = set_context_vectors[r["set_code"]]
 
+    # build_dataset() already guarantees iih is present on every record, but
+    # extra formulas (e.g. play_rate_only -- None when a card was never in any
+    # final deck/sideboard build) aren't guaranteed -- drop any record missing a
+    # value for a formula this run actually needs, before splitting.
+    all_formulas = [formula] + extra_formulas
+    records = [r for r in records if all(RAW_SCORE_FORMULAS[f](r) is not None for f in all_formulas)]
+
     train_names, val_names, test_names = split_by_name_3way(records, VAL_FRACTION, TEST_FRACTION, SPLIT_SEED)
     train_records = [r for r in records if r["name"] in train_names]
     val_records = [r for r in records if r["name"] in val_names]
@@ -218,21 +231,26 @@ def main(
     val_targets = [val_ratings[i] for i in range(len(val_records))]
     test_targets = [test_ratings[i] for i in range(len(test_records))]
 
-    mu2 = sigma2 = None
-    if second_formula:
-        # Independent mu/sigma for the second target -- IIH and GP WR live on
-        # different raw scales, each fit on train only, same as the primary.
-        fn2 = RAW_SCORE_FORMULAS[second_formula]
-        train_raw2 = {i: fn2(r) for i, r in enumerate(train_records)}
-        val_raw2 = {i: fn2(r) for i, r in enumerate(val_records)}
-        test_raw2 = {i: fn2(r) for i, r in enumerate(test_records)}
-        mu2, sigma2 = fit_normalization(train_raw2)
-        train_ratings2 = apply_normalization(train_raw2, mu2, sigma2)
-        val_ratings2 = apply_normalization(val_raw2, mu2, sigma2)
-        test_ratings2 = apply_normalization(test_raw2, mu2, sigma2)
-        train_targets = [(train_targets[i], train_ratings2[i]) for i in range(len(train_records))]
-        val_targets = [(val_targets[i], val_ratings2[i]) for i in range(len(val_records))]
-        test_targets = [(test_targets[i], test_ratings2[i]) for i in range(len(test_records))]
+    # Independent mu/sigma per extra target -- each raw score (IIH, GP WR, PR...)
+    # lives on its own scale, each fit on train only, same as the primary. Once
+    # there's more than one target, train/val/test_targets become tuples
+    # (primary, extra_1, extra_2, ...) instead of bare floats -- evaluate() and
+    # the training loop below are written generically over however many there are.
+    extra_mus, extra_sigmas = [], []
+    for extra_formula in extra_formulas:
+        fn_extra = RAW_SCORE_FORMULAS[extra_formula]
+        train_raw_extra = {i: fn_extra(r) for i, r in enumerate(train_records)}
+        val_raw_extra = {i: fn_extra(r) for i, r in enumerate(val_records)}
+        test_raw_extra = {i: fn_extra(r) for i, r in enumerate(test_records)}
+        mu_extra, sigma_extra = fit_normalization(train_raw_extra)
+        extra_mus.append(mu_extra)
+        extra_sigmas.append(sigma_extra)
+        train_ratings_extra = apply_normalization(train_raw_extra, mu_extra, sigma_extra)
+        val_ratings_extra = apply_normalization(val_raw_extra, mu_extra, sigma_extra)
+        test_ratings_extra = apply_normalization(test_raw_extra, mu_extra, sigma_extra)
+        train_targets = [(*_as_tuple(train_targets[i]), train_ratings_extra[i]) for i in range(len(train_records))]
+        val_targets = [(*_as_tuple(val_targets[i]), val_ratings_extra[i]) for i in range(len(val_records))]
+        test_targets = [(*_as_tuple(test_targets[i]), test_ratings_extra[i]) for i in range(len(test_records))]
 
     print(f"[device] {DEVICE}")
     model = CardRatingNetJoint(
@@ -243,7 +261,7 @@ def main(
         head_dropout=head_dropout,
         base_model_path=base_model_path,
         set_context_dim=CONTEXT_DIM if use_set_context else 0,
-        output_dim=2 if second_formula else 1,
+        output_dim=len(all_formulas),
     ).to(DEVICE)
     model.text_encoder.print_trainable_parameters()
     optimizer = torch.optim.Adam(
@@ -285,12 +303,9 @@ def main(
         # training happened to stop at -- the 40-epoch/3-seed sweep showed the
         # final epoch can be meaningfully worse than the best one reached mid-run.
         val_mse, val_extra, _ = evaluate(model, val_records, val_targets)
-        if second_formula:
-            (mse1, corr1), (mse2, corr2) = val_extra
-            print(
-                f"[epoch {epoch}] train MSE={train_mse:.3f}  val MSE={val_mse:.3f} "
-                f"({formula}: MSE={mse1:.3f} r={corr1:.3f} | {second_formula}: MSE={mse2:.3f} r={corr2:.3f})"
-            )
+        if extra_formulas:
+            detail = " | ".join(f"{name}: MSE={m:.3f} r={r:.3f}" for name, (m, r) in zip(all_formulas, val_extra))
+            print(f"[epoch {epoch}] train MSE={train_mse:.3f}  val MSE={val_mse:.3f} ({detail})")
         else:
             print(f"[epoch {epoch}] train MSE={train_mse:.3f}  val MSE={val_mse:.3f} Pearson r={val_extra:.3f}")
 
@@ -311,12 +326,9 @@ def main(
     # the reported number would be optimistically biased by having picked the
     # checkpoint that happens to look best on this specific test set.
     test_mse, test_extra, preds = evaluate(model, test_records, test_targets)
-    if second_formula:
-        (mse1, corr1), (mse2, corr2) = test_extra
-        print(
-            f"[test] n={len(test_targets)} combined MSE={test_mse:.3f} "
-            f"({formula}: MSE={mse1:.3f} r={corr1:.3f} | {second_formula}: MSE={mse2:.3f} r={corr2:.3f})"
-        )
+    if extra_formulas:
+        detail = " | ".join(f"{name}: MSE={m:.3f} r={r:.3f}" for name, (m, r) in zip(all_formulas, test_extra))
+        print(f"[test] n={len(test_targets)} combined MSE={test_mse:.3f} ({detail})")
     else:
         print(f"[test:{formula}] n={len(test_targets)} MSE={test_mse:.3f} Pearson r={test_extra:.3f}")
 
@@ -324,7 +336,7 @@ def main(
         save_checkpoint(
             model, mu, sigma, formula, checkpoint_dir=checkpoint_dir,
             base_model_path=base_model_path, use_set_context=use_set_context,
-            second_formula=second_formula, mu2=mu2, sigma2=sigma2,
+            extra_formulas=extra_formulas, extra_mus=extra_mus, extra_sigmas=extra_sigmas,
         )
     # best_val_mse is returned so a multi-seed sweep can pick which checkpoint to
     # keep by val score, not test score -- selecting on test would reintroduce

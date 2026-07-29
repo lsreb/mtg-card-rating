@@ -19,6 +19,13 @@ gih_wr = gp_wr + (1 - p) * iih (p = fraction of games the card was actually draw
   weighting further past gih_iih rather than back towards gih, to see whether
   the trend (gih_2iih beat gih_iih beat gp_iih empirically, seed 0) keeps
   improving or eventually reverses.
+- "iih_only"/"gp_wr_only": iih or gp_wr alone, the two extremes of the axis
+  above (k=infinity and k=0 respectively). Used both as single-output targets
+  and as components of train_lora.py's multi-output (`extra_formulas`) mode.
+- "play_rate_only": play_rate alone ("PR") -- how often a card is maindecked
+  when available in the pool, not a win rate at all. `None` for cards never
+  seen in any final deck/sideboard build (train_lora.py drops those rows when
+  this formula is requested, rather than crashing on the missing value).
 
 0-10 normalization: 5 = mean across the card pool, 0 and 10 = mean +/- STD_MULTIPLIER
 standard deviations of the raw score (not literal min/max, which is an unstable,
@@ -45,6 +52,7 @@ RAW_SCORE_FORMULAS = {
     "gih_15iih": lambda m: m["gih_wr"] + 15 * m["iih"],
     "iih_only": lambda m: m["iih"],
     "gp_wr_only": lambda m: m["gp_wr"],
+    "play_rate_only": lambda m: m["play_rate"],
 }
 
 

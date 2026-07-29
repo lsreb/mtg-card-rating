@@ -76,9 +76,10 @@ Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly co
 -However our final goal is still to rate the cards depending on the context of their set.
 -A possibility could be to change the output from "IIH" to the couple "(IIH, GP WR)". GP WR or GIH WR should be about the same, as their difference is somewhat proportional to IIH. This could make IIH harder to learn. The network may need extra help (attention?) to work even better, use the "set code" feature.
 -Plus de couches dans le MLP ? > pas très concluant pour le moment
--Plus d'epochs de pretraining ?
+-Plus d'epochs de pretraining ? > Pas avec lora64
 -Un mécanisme d'attention pour mieux intégrer le contexte ?
 -Apprendre GP ? > sortie couple, pas vraiment de gain ni de perte prouvée sur Lora32 pretrain. Good with Lora64, mandatory even.
--Lora pretrain 64? > works well to predict the couple IIH GP, not IIH on its own.
--Open question: compute the mean IIH of commons and uncommons, or a similar metric, for a set, compare it to the color winrate, its correlation.
+-Lora pretrain 64? > works well to predict the couple IIH GP, not IIH on its own. We may see this as an auxiliary task. Add more auxiliary tasks?
+-Open question: compute the mean IIH of commons and uncommons, or a similar metric, for a set, compare it to the color winrate, its correlation > in MSH, W IIH is not that good, while B is pretty good. My interpretation is that black decks are generally rather bad...
 -Display: display the ratings result as a list by color, that can be opened in html, strong cards to weak cards.
+-It may be better to try to learn the GP of a card relative to the color GP. IIH is really, really biased otherwise.

@@ -67,7 +67,11 @@ def get_set_metrics(set_code: str, event_type: str = "PremierDraft") -> dict:
         return _load_cached_metrics(cache_path)
 
     game_data_path = download_game_data(set_code, event_type)
-    metrics = compute_card_metrics(game_data_path)
+    # include_play_rate=True: measured overhead is modest (+10.2% wall time on
+    # MSH's 377k-row game_data, 220.9s -> 243.4s) now that it's actually needed
+    # for the "PR" (play_rate) target -- previously left off since nothing used
+    # it and it wasn't free.
+    metrics = compute_card_metrics(game_data_path, include_play_rate=True)
     _save_metrics_cache(cache_path, metrics)
     game_data_path.unlink()
     return metrics
