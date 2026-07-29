@@ -63,7 +63,7 @@ def split_texts(texts: list, val_fraction: float, seed: int):
     return shuffled[n_val:], shuffled[:n_val]
 
 
-def build_model(tokenizer, full_finetune: bool = False):
+def build_model(tokenizer, full_finetune: bool = False, lora_rank: int = LORA_RANK):
     base_model = AutoModelForMaskedLM.from_pretrained(MODEL_NAME)
     if full_finetune:
         # No peft wrapping at all -- every one of the 34.9M params (base
@@ -80,8 +80,8 @@ def build_model(tokenizer, full_finetune: bool = False):
         return base_model
 
     lora_config = LoraConfig(
-        r=LORA_RANK,
-        lora_alpha=2 * LORA_RANK,
+        r=lora_rank,
+        lora_alpha=2 * lora_rank,
         target_modules=["query", "value"],
         modules_to_save=["cls"],
         lora_dropout=0.0,
@@ -139,6 +139,7 @@ def main(
     checkpoint_root: Path = None,
     full_finetune: bool = False,
     output_dir: Path = None,
+    lora_rank: int = LORA_RANK,
 ):
     torch.manual_seed(seed)
     output_dir = output_dir or OUTPUT_DIR
@@ -153,7 +154,7 @@ def main(
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=True, mlm_probability=MLM_PROBABILITY)
 
-    model = build_model(tokenizer, full_finetune=full_finetune).to(DEVICE)
+    model = build_model(tokenizer, full_finetune=full_finetune, lora_rank=lora_rank).to(DEVICE)
     trainable = [p for p in model.parameters() if p.requires_grad]
     # Same differential-LR reasoning as the rating fine-tune (lower for the
     # LoRA-adapted attention weights, higher for the freshly-initialized MLM
