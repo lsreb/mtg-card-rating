@@ -183,9 +183,20 @@ def main(
     use_set_context: bool = False,
     hidden_dims: list = None,
     extra_formulas: list = None,
+    raw_formulas: list = None,
     checkpoint_dir: Path = None,
 ):
     extra_formulas = extra_formulas or []
+    # Formulas in raw_formulas (must be a subset of extra_formulas) skip the
+    # 0-10 rating normalization entirely and train on the raw score as-is --
+    # e.g. play_rate is already a meaningful, interpretable 0-1 fraction, and
+    # forcing it through the same z-score-to-rating mapping as IIH/GP would
+    # make it just as opaque as them for no benefit. Note this means its
+    # squared-error contribution to the shared loss is on a very different
+    # scale (0-1 vs 0-10) than the normalized outputs -- effectively a much
+    # smaller implicit weight in the unweighted mean the loss uses, not
+    # rebalanced here.
+    raw_formulas = set(raw_formulas or [])
     # `seed` controls only model init (LoRA adapter matrices, head) and epoch
     # shuffling -- the train/test partition always uses the fixed SPLIT_SEED, so
     # runs with different `seed` measure pure optimization variance on the same
@@ -242,6 +253,15 @@ def main(
         train_raw_extra = {i: fn_extra(r) for i, r in enumerate(train_records)}
         val_raw_extra = {i: fn_extra(r) for i, r in enumerate(val_records)}
         test_raw_extra = {i: fn_extra(r) for i, r in enumerate(test_records)}
+        if extra_formula in raw_formulas:
+            mu_extra = sigma_extra = None
+            train_ratings_extra, val_ratings_extra, test_ratings_extra = train_raw_extra, val_raw_extra, test_raw_extra
+            extra_mus.append(mu_extra)
+            extra_sigmas.append(sigma_extra)
+            train_targets = [(*_as_tuple(train_targets[i]), train_ratings_extra[i]) for i in range(len(train_records))]
+            val_targets = [(*_as_tuple(val_targets[i]), val_ratings_extra[i]) for i in range(len(val_records))]
+            test_targets = [(*_as_tuple(test_targets[i]), test_ratings_extra[i]) for i in range(len(test_records))]
+            continue
         mu_extra, sigma_extra = fit_normalization(train_raw_extra)
         extra_mus.append(mu_extra)
         extra_sigmas.append(sigma_extra)
