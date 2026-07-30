@@ -139,6 +139,59 @@ def score_predictions(preds: list, targets: list):
     return mse, corr
 
 
+def weighted_mse_loss(
+    pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor,
+    threshold_penalty_weight: float = 0.0, threshold: float = 1.0,
+    loss_shape: str = "mse", saturating_asymptote: float = 8.0, saturating_scale: float = 3.0,
+) -> torch.Tensor:
+    """Weighted mean squared error (or a saturating alternative, see
+    `loss_shape` below) -- weight is per-card (batch,); broadcasts across
+    output components for the dual-target case (batch, output_dim). With
+    uniform weight=1 and loss_shape="mse" this is exactly
+    nn.MSELoss()(pred, target), so the defaults leave training byte-for-byte
+    unchanged from every prior run in this project.
+
+    loss_shape="saturating": replaces the per-example squared error
+    (pred-target)^2 with a Geman-McClure-style robust loss,
+    `A * e^2 / (e^2 + B)` where e = pred-target -- convex and ~quadratic
+    (matches plain MSE) for small errors, but bends over to a concave,
+    flattening shape and saturates to a fixed asymptote A for large ones,
+    instead of growing without bound. Designed together with the user from
+    three explicit constraints: inflection exactly at |e|=1 (premier_jet.md's
+    "worse than 1 is a fail" threshold, in rating-scale units) -- which fixes
+    B = 3*(inflection_x)^2 = 3 algebraically, independent of A -- and a slope
+    of 3 *at* that inflection point, which (given B=3) fixes A = 8 (since
+    slope_at_1 = 3*A/8). With A=8, B=3: loss value at the threshold is
+    exactly 2, asymptote is 8. threshold_penalty_weight's hinge-squared
+    add-on (below) is a separate, cruder attempt at the same "don't let
+    ratings drift arbitrarily far apart" goal -- the two aren't meant to be
+    combined, this saturating shape supersedes it as the more principled
+    version.
+
+    threshold_penalty_weight (default 0, disabled): per premier_jet.md's own
+    note ("if a rating prediction is worse than 1, it's a fail"), an extra
+    hinge-squared term -- max(0, |pred-target| - threshold)^2 -- added on top
+    of the base error term. Exactly zero contribution (and zero gradient) for
+    any prediction already within `threshold` of its target, so it doesn't
+    touch training for the already-fine majority; ramps up specifically for
+    the worst misses. `pred`/`target` are already on the 0-10 rating scale at
+    the call site, so threshold=1.0 matches "worse than 1" literally."""
+    if pred.dim() > 1:
+        weight = weight.unsqueeze(-1).expand_as(pred)
+    sq_err = (pred - target) ** 2
+    if loss_shape == "saturating":
+        base_err = saturating_asymptote * sq_err / (sq_err + saturating_scale)
+    else:
+        base_err = sq_err
+    mse = (base_err * weight).sum() / weight.sum()
+    if not threshold_penalty_weight:
+        return mse
+    overage = (pred - target).abs() - threshold
+    hinge = overage.clamp(min=0) ** 2
+    penalty = (hinge * weight).sum() / weight.sum()
+    return mse + threshold_penalty_weight * penalty
+
+
 def evaluate(model: CardRatingNetJoint, records: list, targets: list):
     model.eval()
     preds = []
@@ -217,6 +270,12 @@ def main(
     raw_formulas: list = None,
     checkpoint_dir: Path = None,
     split_mode: str = "name",  # "name" (default, every prior result in this project) or "set" (honesty check)
+    sample_weight_power: float = 0.0,  # 0 = uniform (default, unchanged behavior); >0 upweights high-game-count cards
+    threshold_penalty_weight: float = 0.0,  # 0 = disabled (default); >0 adds a hinge-squared penalty beyond `threshold`
+    threshold: float = 1.0,  # rating-scale units (0-10); premier_jet.md's "worse than 1 is a fail"
+    loss_shape: str = "mse",  # "mse" (default, unchanged) or "saturating" (Geman-McClure style, see weighted_mse_loss)
+    saturating_asymptote: float = 8.0,
+    saturating_scale: float = 3.0,
 ):
     extra_formulas = extra_formulas or []
     # Formulas in raw_formulas (must be a subset of extra_formulas) skip the
@@ -344,7 +403,16 @@ def main(
             {"params": model.head.parameters(), "lr": head_lr},
         ]
     )
-    loss_fn = nn.MSELoss()
+    # Sample-count-aware weighting: GP WR (and IIH) are themselves empirical win
+    # rates, noisier for low-game-count cards -- a plain, unweighted MSE asks the
+    # model to fit a 300-game card's label just as hard as a 100k-game card's,
+    # even though the former carries much more sampling noise. gih_count +
+    # gns_count is the true denominator behind gp_wr (see labels.py). Power=0
+    # (default) keeps every weight at 1.0, identical to the unweighted loss used
+    # everywhere else in this project.
+    for r in train_records:
+        n = (r.get("gih_count") or 0) + (r.get("gns_count") or 0)
+        r["_loss_weight"] = max(n, 1) ** sample_weight_power if sample_weight_power else 1.0
 
     train_pairs = list(zip(train_records, train_targets))
     rng = random.Random(seed)
@@ -362,11 +430,15 @@ def main(
             batch_targets = [t for _, t in batch]
             structured = torch.tensor([r["structured"] for r in batch_records], dtype=torch.float32, device=DEVICE)
             target = torch.tensor(batch_targets, dtype=torch.float32, device=DEVICE)
+            weight = torch.tensor([r["_loss_weight"] for r in batch_records], dtype=torch.float32, device=DEVICE)
             set_context = _set_context_tensor(batch_records)
 
             optimizer.zero_grad()
             pred = model(structured, [r["oracle_text"] for r in batch_records], set_context)
-            loss = loss_fn(pred, target)
+            loss = weighted_mse_loss(
+                pred, target, weight, threshold_penalty_weight, threshold,
+                loss_shape, saturating_asymptote, saturating_scale,
+            )
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * len(batch)
