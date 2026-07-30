@@ -23,11 +23,12 @@ from pathlib import Path
 import torch
 from torch import nn
 
+from mtg_rating.color_context import primary_color
 from mtg_rating.features import structured_features
 from mtg_rating.model_joint import CardRatingNetJoint
 from mtg_rating.multiset import SET_CODES, build_dataset
 from mtg_rating.ratings import RAW_SCORE_FORMULAS, apply_normalization, fit_normalization
-from mtg_rating.set_context import CONTEXT_DIM, compute_set_context_vectors
+from mtg_rating.set_context import CONTEXT_DIM, compute_per_color_context_vectors, compute_set_context_vectors
 from mtg_rating.text_embeddings import MODEL_NAME
 from mtg_rating.train_multiset import pearson
 
@@ -160,6 +161,7 @@ def save_checkpoint(
     checkpoint_dir: Path = None,
     base_model_path=MODEL_NAME,
     use_set_context: bool = False,
+    use_color_context: bool = False,
     extra_formulas: list = None,
     extra_mus: list = None,
     extra_sigmas: list = None,
@@ -182,6 +184,7 @@ def save_checkpoint(
             # dimensions or load the wrong base weights.
             "base_model_path": str(base_model_path),
             "use_set_context": use_set_context,
+            "use_color_context": use_color_context,
             # Empty unless training more than one output (see `extra_formulas`
             # on main()) -- each extra target has its own independent mu/sigma,
             # fit separately, in the same order as extra_formulas.
@@ -207,6 +210,7 @@ def main(
     formula: str = FORMULA,
     base_model_path=MODEL_NAME,
     use_set_context: bool = False,
+    use_color_context: bool = False,
     hidden_dims: list = None,
     layer_norm: bool = False,
     extra_formulas: list = None,
@@ -225,6 +229,7 @@ def main(
     # smaller implicit weight in the unweighted mean the loss uses, not
     # rebalanced here.
     raw_formulas = set(raw_formulas or [])
+    assert not (use_set_context and use_color_context), "use_set_context and use_color_context are alternatives, not both"
     # `seed` controls only model init (LoRA adapter matrices, head) and epoch
     # shuffling -- the train/test partition always uses the fixed SPLIT_SEED, so
     # runs with different `seed` measure pure optimization variance on the same
@@ -244,6 +249,20 @@ def main(
         set_context_vectors = compute_set_context_vectors(records)
         for r in records:
             r["set_context"] = set_context_vectors[r["set_code"]]
+    elif use_color_context:
+        # Same fixed-mean idea, but grouped by (set, primary color) instead of
+        # by whole set -- a more targeted "average card of this color in this
+        # set" summary. Still zero trainable parameters (just a different
+        # grouping for the same averaging operation), so it doesn't inherit
+        # the by-set generalization problem the *trainable* attention version
+        # (color_context.py's ColorAttentionContext, train_color_context.py)
+        # was shown to have -- there's nothing here for a by-set split to
+        # catch. Reuses the model's existing "set_context" input slot (same
+        # dimensionality, CONTEXT_DIM either way), so no model_joint.py change
+        # is needed -- only which vector gets computed and stored here.
+        per_color_vectors = compute_per_color_context_vectors(records)
+        for r in records:
+            r["set_context"] = per_color_vectors[r["set_code"]][primary_color(r["scryfall_card"])]
 
     # build_dataset() already guarantees iih is present on every record, but
     # extra formulas (e.g. play_rate_only -- None when a card was never in any
@@ -315,7 +334,7 @@ def main(
         lora_dropout=lora_dropout,
         head_dropout=head_dropout,
         base_model_path=base_model_path,
-        set_context_dim=CONTEXT_DIM if use_set_context else 0,
+        set_context_dim=CONTEXT_DIM if (use_set_context or use_color_context) else 0,
         output_dim=len(all_formulas),
     ).to(DEVICE)
     model.text_encoder.print_trainable_parameters()
@@ -390,7 +409,7 @@ def main(
     if save:
         save_checkpoint(
             model, mu, sigma, formula, checkpoint_dir=checkpoint_dir,
-            base_model_path=base_model_path, use_set_context=use_set_context,
+            base_model_path=base_model_path, use_set_context=use_set_context, use_color_context=use_color_context,
             extra_formulas=extra_formulas, extra_mus=extra_mus, extra_sigmas=extra_sigmas,
         )
     # best_val_mse is returned so a multi-seed sweep can pick which checkpoint to
