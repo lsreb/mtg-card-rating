@@ -192,6 +192,34 @@ def weighted_mse_loss(
     return mse + threshold_penalty_weight * penalty
 
 
+def contrastive_loss(text_embedding: torch.Tensor, target_component: torch.Tensor, tau: float) -> torch.Tensor:
+    """Auxiliary embedding-space loss: pulls two cards' raw text embeddings
+    together in proportion to how close their actual target values are, and
+    apart otherwise -- regardless of surface text similarity. Motivated
+    directly by the Annul embedding probe (see project memory): the card
+    most similar to Annul in embedding space (a flexible, unrestricted
+    counterspell) had one of the *largest* real GP WR gaps, i.e. the encoder
+    currently organizes by surface "counter"/"target" vocabulary, not by the
+    functional restrictiveness that actually drives outcomes. Rather than
+    hand-picking which textual cues signal restrictiveness (tried, rejected
+    as too approximate), this lets gradient descent find whatever cue
+    produces the right embedding geometry on its own.
+
+    target_sim = exp(-|target_i - target_j| / tau) -- close targets get a
+    target_sim near 1 (pull together), far-apart targets get a target_sim
+    near 0 (push apart), smoothly rather than a hard positive/negative
+    split. Computed pairwise within the batch (batch, batch), matching the
+    scale to actual cosine similarity of the (already L2-normalized)
+    embeddings. tau=1.0 uses the same rating-scale unit as
+    `threshold_penalty_weight`'s threshold elsewhere in this file."""
+    normed = torch.nn.functional.normalize(text_embedding, dim=-1)
+    sim = normed @ normed.T
+    gap = (target_component.unsqueeze(0) - target_component.unsqueeze(1)).abs()
+    target_sim = torch.exp(-gap / tau)
+    mask = ~torch.eye(len(target_component), dtype=torch.bool, device=target_component.device)
+    return ((sim - target_sim) ** 2)[mask].mean()
+
+
 def evaluate(model: CardRatingNetJoint, records: list, targets: list):
     model.eval()
     preds = []
@@ -276,6 +304,8 @@ def main(
     loss_shape: str = "mse",  # "mse" (default, unchanged) or "saturating" (Geman-McClure style, see weighted_mse_loss)
     saturating_asymptote: float = 8.0,
     saturating_scale: float = 3.0,
+    contrastive_weight: float = 0.0,  # 0 = disabled (default); >0 adds the embedding-space auxiliary loss
+    contrastive_tau: float = 1.0,
 ):
     extra_formulas = extra_formulas or []
     # Formulas in raw_formulas (must be a subset of extra_formulas) skip the
@@ -439,6 +469,16 @@ def main(
                 pred, target, weight, threshold_penalty_weight, threshold,
                 loss_shape, saturating_asymptote, saturating_scale,
             )
+            if contrastive_weight:
+                # Separate forward through the same shared encoder -- duplicates
+                # the text-encoder compute (model() already runs it internally)
+                # rather than threading an extra return value through
+                # CardRatingNetJoint.forward(), which train_color_context.py also
+                # depends on -- acceptable overhead for a first test, same
+                # tradeoff train_color_context.py already made.
+                text_embedding = model.text_encoder([r["oracle_text"] for r in batch_records])
+                target_component = target[:, -1] if target.dim() > 1 else target
+                loss = loss + contrastive_weight * contrastive_loss(text_embedding, target_component, contrastive_tau)
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * len(batch)
