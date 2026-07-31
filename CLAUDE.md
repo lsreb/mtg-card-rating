@@ -37,6 +37,14 @@ Run from the repo root, e.g. `conda run -n env_coinche python -m mtg_rating.trai
   simpler pipeline (frozen MiniLM, no LoRA fine-tuning), kept for comparison.
 - **Experimental trainable-attention pipeline**: `python -m mtg_rating.train_color_context`
   — not part of the adopted config (see Status below), kept for any future revisit.
+- **Rate a whole set and render an HTML list**: `python -m mtg_rating.rate_set` (edit the
+  `main("DFT")` call at the bottom, or `python -c 'from mtg_rating.rate_set import main; main("MKM")'`
+  for another set) — loads the `lora_joint_dual` checkpoint, rates every card of the given
+  set, and writes `data/ratings/ratings_<set>.html`: one table per primary color (WUBRG
+  first-color grouping, see `color_context.primary_color`), sorted strongest to weakest by
+  predicted GP WR (IIH shown alongside). premier_jet.md section 5's original display idea.
+  Needs only Scryfall data for that set, no 17Lands labels — works on any set, including
+  ones outside `multiset.SET_CODES` with no draft history yet.
 
 No automated test suite. Verification throughout this project has been: build a
 `train_lora.main()` (or similar) call, run it, inspect val/test MSE and Pearson r printed
@@ -121,6 +129,13 @@ result — see "By-name vs by-set" below, this has bitten the project multiple t
 - **`train_multiset.py`** — older frozen-embedding trainer, `pearson()` (reused by
   `train_lora.py`), `save_pool_summary()`.
 - **`smoke_test.py`** — quick end-to-end check across all three original formulas.
+- **`rate_set.py`** — inference/display only, no training: loads a saved `CardRatingNetJoint`
+  checkpoint (`load_model`, handles both the current `extra_formulas`-list checkpoint
+  format and the older single-`second_formula` shape `lora_joint_dual/head.pt` was saved
+  with), rates every non-basic-land card of a given set (`rate_cards`), and renders
+  `render_html`'s per-color (strong-to-weak) HTML table. `_context_vector_for_set` reuses
+  `set_context.py`'s cached whole-set vector for the 26 pooled sets, or computes the same
+  mean fresh — without writing to that shared cache — for any other set.
 
 ## Current best-known config
 
