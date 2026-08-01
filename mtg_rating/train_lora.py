@@ -220,6 +220,76 @@ def contrastive_loss(text_embedding: torch.Tensor, target_component: torch.Tenso
     return ((sim - target_sim) ** 2)[mask].mean()
 
 
+@torch.no_grad()
+def mine_hard_triplets(model: CardRatingNetJoint, records: list, targets: list, threshold: float) -> list:
+    """Find, for every training card, the single hardest negative for a
+    triplet loss (see `triplet_loss` below) -- the card whose *text embedding*
+    is most similar under the model's current encoder, among cards whose
+    *real target value* is more than `threshold` apart (same rating-scale
+    unit as `threshold_penalty_weight`/`contrastive_tau` elsewhere in this
+    file). This is exactly the failure pattern the Annul embedding probe
+    found (see `contrastive_loss`'s docstring): surface-similar, outcome-very-
+    different pairs. The positive is just the closest *real target value* in
+    the pool -- no embedding search needed for that half, since target values
+    are already known upfront.
+
+    A full forward pass over every training record (not just one batch), so
+    this is meant to be called periodically (e.g. once per epoch, from
+    `main`'s `triplet_mining_every`) rather than every step -- LoRA's
+    differential, deliberately small LR means the embedding space doesn't
+    shift much within an epoch, so triplets mined at its start stay
+    informative through the epoch's batches, and re-embedding the whole pool
+    on every mini-batch step would cost far more than training itself.
+
+    Returns a list of (anchor_idx, positive_idx, negative_idx) into
+    `records`/`targets` -- indices are only valid against that exact list
+    (train_records itself is never reordered, only the record/target zip
+    used for batching is, so these stay valid for the whole epoch).
+    """
+    was_training = model.training
+    model.eval()
+    embeddings = []
+    for start in range(0, len(records), BATCH_SIZE):
+        batch = records[start : start + BATCH_SIZE]
+        embeddings.append(model.text_encoder([r["oracle_text"] for r in batch]))
+    embeddings = torch.nn.functional.normalize(torch.cat(embeddings, dim=0), dim=-1)
+    if was_training:
+        model.train()
+
+    target_values = torch.tensor(
+        [_as_tuple(t)[-1] for t in targets], dtype=torch.float32, device=embeddings.device
+    )
+    sim = embeddings @ embeddings.T
+    gap = (target_values.unsqueeze(0) - target_values.unsqueeze(1)).abs()
+    n = len(records)
+    eye = torch.eye(n, dtype=torch.bool, device=embeddings.device)
+
+    far_mask = (gap > threshold) & ~eye
+    has_negative = far_mask.any(dim=1)
+    negative_idx = sim.masked_fill(~far_mask, float("-inf")).argmax(dim=1)
+
+    pos_gap = gap.masked_fill(eye, float("inf"))
+    positive_idx = pos_gap.argmin(dim=1)
+
+    anchors = torch.arange(n, device=embeddings.device)[has_negative]
+    return list(zip(anchors.tolist(), positive_idx[has_negative].tolist(), negative_idx[has_negative].tolist()))
+
+
+def triplet_loss(anchor: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor, margin: float) -> torch.Tensor:
+    """Standard margin triplet loss (cosine-distance version, matching the
+    cosine similarity `mine_hard_triplets` used to pick `negative` in the
+    first place): pushes the anchor closer to `positive` (closest real
+    target value) than to `negative` (closest embedding, but a real target
+    more than `threshold` away) by at least `margin`, zero loss/gradient
+    once that's already true."""
+    a = torch.nn.functional.normalize(anchor, dim=-1)
+    p = torch.nn.functional.normalize(positive, dim=-1)
+    n = torch.nn.functional.normalize(negative, dim=-1)
+    d_ap = 1 - (a * p).sum(dim=-1)
+    d_an = 1 - (a * n).sum(dim=-1)
+    return (d_ap - d_an + margin).clamp(min=0).mean()
+
+
 def evaluate(model: CardRatingNetJoint, records: list, targets: list):
     model.eval()
     preds = []
@@ -306,6 +376,10 @@ def main(
     saturating_scale: float = 3.0,
     contrastive_weight: float = 0.0,  # 0 = disabled (default); >0 adds the embedding-space auxiliary loss
     contrastive_tau: float = 1.0,
+    triplet_weight: float = 0.0,  # 0 = disabled (default); >0 adds the hard-mined triplet loss (see mine_hard_triplets)
+    triplet_margin: float = 0.5,
+    triplet_target_threshold: float = 1.0,  # rating-scale units; same "worse than 1 is a fail" threshold as above
+    triplet_mining_every: int = 1,  # epochs between re-mining; 1 = every epoch
 ):
     extra_formulas = extra_formulas or []
     # Formulas in raw_formulas (must be a subset of extra_formulas) skip the
@@ -450,8 +524,12 @@ def main(
     best_val_mse = float("inf")
     best_state = None
     patience_counter = 0
+    triplet_pairs = []  # (anchor_idx, positive_idx, negative_idx) into train_records/train_targets
 
     for epoch in range(epochs):
+        if triplet_weight and epoch % triplet_mining_every == 0:
+            triplet_pairs = mine_hard_triplets(model, train_records, train_targets, triplet_target_threshold)
+            print(f"[triplet mining] epoch {epoch}: {len(triplet_pairs)} anchors with a hard negative")
         rng.shuffle(train_pairs)
         model.train()
         total_loss = 0.0
@@ -479,6 +557,25 @@ def main(
                 text_embedding = model.text_encoder([r["oracle_text"] for r in batch_records])
                 target_component = target[:, -1] if target.dim() > 1 else target
                 loss = loss + contrastive_weight * contrastive_loss(text_embedding, target_component, contrastive_tau)
+            if triplet_weight and triplet_pairs:
+                # One triplet per card in this batch (or fewer if there aren't
+                # enough mined triplets yet) -- same batch-size-matching
+                # convention as the contrastive_weight branch above. One
+                # concatenated forward for anchor+positive+negative texts
+                # instead of three, to only pay the tokenizer/encoder
+                # overhead once per batch.
+                sample = rng.sample(triplet_pairs, min(len(batch), len(triplet_pairs)))
+                a_idx, p_idx, n_idx = zip(*sample)
+                triplet_texts = (
+                    [train_records[i]["oracle_text"] for i in a_idx]
+                    + [train_records[i]["oracle_text"] for i in p_idx]
+                    + [train_records[i]["oracle_text"] for i in n_idx]
+                )
+                triplet_embeds = model.text_encoder(triplet_texts)
+                k = len(a_idx)
+                loss = loss + triplet_weight * triplet_loss(
+                    triplet_embeds[:k], triplet_embeds[k : 2 * k], triplet_embeds[2 * k :], triplet_margin
+                )
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * len(batch)

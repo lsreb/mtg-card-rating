@@ -120,8 +120,15 @@ result — see "By-name vs by-set" below, this has bitten the project multiple t
   the honesty check), trains `CardRatingNetJoint` end to end with differential LRs
   (LoRA slower than the fresh head), early stopping on val MSE (never test), and several
   opt-in-only loss variants (`sample_weight_power`, `threshold_penalty_weight`,
-  `loss_shape="saturating"`, `contrastive_weight`) — **all default to plain unweighted
-  MSE, none of them confirmed to help, see Status.**
+  `loss_shape="saturating"`, `contrastive_weight`, `triplet_weight`) — **all default to
+  plain unweighted MSE, none of them confirmed to help, see Status.** `triplet_weight`
+  is the newest: `mine_hard_triplets` periodically (`triplet_mining_every`, default every
+  epoch) re-embeds the whole train set to find each card's hardest same-text/different-
+  outcome negative (the Annul-probe failure pattern), paired with its closest-real-target
+  positive (no embedding search needed for that half); `triplet_loss` is a standard
+  cosine-distance margin loss on those mined triples. Sharper-targeted successor to
+  `contrastive_weight`'s random-in-batch-pairs version (which showed no reproducible
+  effect across 12 runs) — **not yet run/confirmed itself**, only smoke-tested so far.
 - **`train_color_context.py`** — the experimental trainable-attention pipeline (buckets
   cards by (set, primary color), cross-attention over commons/uncommons as the
   informant pool). Includes DANN support. **Not adopted** — kept for reference/reuse if
@@ -212,10 +219,11 @@ main(
   clauses from bonus ones), empirically search a broad candidate keyword/pattern list
   for real correlation with the GP-vs-IIH residual *before* encoding anything.
 - **Richer contrastive formulation**: the simple pairwise soft-target version tried
-  (`exp(-|target_gap|/tau)`) showed no reproducible effect across 12 runs — a triplet
-  loss with actively mined hard negatives (e.g. specifically pairing cards with similar
-  surface text but different real outcomes, like the Annul/Protect-the-Negotiators case)
-  might be a stronger signal than random in-batch pairs.
+  (`exp(-|target_gap|/tau)`) showed no reproducible effect across 12 runs. **Now
+  implemented** as `train_lora.py`'s `triplet_weight`/`mine_hard_triplets` (periodic
+  hard-negative mining: same-text/different-outcome pairs like Annul/Protect-the-
+  Negotiators) — smoke-tested only so far, not yet run for a real result or
+  multi-seed-confirmed.
 - **v2 richer color-pair grouping** for the (currently not-adopted) trainable attention
   line: group by 2-color archetype pairs instead of single primary color — never built,
   the single-color version was meant as the simpler stepping stone and was abandoned
