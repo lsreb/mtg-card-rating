@@ -128,7 +128,10 @@ result — see "By-name vs by-set" below, this has bitten the project multiple t
   positive (no embedding search needed for that half); `triplet_loss` is a standard
   cosine-distance margin loss on those mined triples. Sharper-targeted successor to
   `contrastive_weight`'s random-in-batch-pairs version (which showed no reproducible
-  effect across 12 runs) — **not yet run/confirmed itself**, only smoke-tested so far.
+  effect across 12 runs) — **tried, ruled out** (see Status): no benefit at
+  `weight=1.0/margin=0.5` (2 seeds), and monotonically *worse* (both IIH and GP WR) at
+  `weight=5.0/margin=1.0`, consistent with fighting the main objective rather than
+  complementing it on this little trainable capacity, not just an under-tuned weight.
 - **`train_color_context.py`** — the experimental trainable-attention pipeline (buckets
   cards by (set, primary color), cross-attention over commons/uncommons as the
   informant pool). Includes DANN support. **Not adopted** — kept for reference/reuse if
@@ -161,6 +164,13 @@ main(
     base_model_path="data/models/minilm_mtg_pretrained_rank64_checkpoints/epoch4",
 )
 ```
+
+Exact test-set performance of this checkpoint (1303 test rows, `SPLIT_SEED=42`,
+deterministic -- re-measured directly by loading `lora_joint_dual/head.pt` and
+evaluating, not a training-time log, since none was kept for the original run):
+combined MSE 1.727; `iih_only` MSE 1.460, r 0.630; `gp_wr_only` MSE 1.994, r 0.482.
+Matches the r range below (0.6 / 0.48-0.5) but is the first time the MSE side was
+pinned down precisely.
 
 ## Key established facts (don't re-litigate without new evidence)
 
@@ -195,14 +205,19 @@ main(
   probe confirmed this concretely: Annul's *closest* embedding-space neighbor among
   comparable blue instants is a much more flexible, better-performing counterspell —
   the encoder currently organizes by surface "counter"/"target" vocabulary, not by
-  functional restrictiveness. **Five different fixes were tried and none held up under
+  functional restrictiveness. **Six different fixes were tried and none held up under
   multi-seed confirmation**: sample weighting by game count (made it worse — high-count
   cards are disproportionately unexciting average commons, not reliable extremes),
   a hinge-squared threshold penalty, a Geman-McClure-style saturating loss (replacing
   MSE outright softens gradient for normal cards too, not just outliers), a contrastive
   embedding-space auxiliary loss (12 runs across weight/temperature, no reproducible
-  trend), and more rating-LoRA capacity (rank 8, worse again). This is an **open
-  problem** — see below for untried directions.
+  trend), more rating-LoRA capacity (rank 8, worse again), and a hard-negative-mined
+  triplet loss (`train_lora.py`'s `triplet_weight`, see Architecture) — no benefit at
+  `weight=1.0/margin=0.5` (2 seeds), monotonically *worse* at `weight=5.0/margin=1.0`
+  (1 seed), i.e. more pressure made it worse rather than revealing an under-tuned
+  weight, consistent with the auxiliary objective fighting the main one on the rating-
+  LoRA's very small trainable capacity (36,864 params) rather than complementing it.
+  This is an **open problem** — see below for untried directions.
 - **Reprints across sets, basic lands, Alchemy/draft-innovation sets**: reprints are
   rare enough (~1% of the pooled dataset) not to be a serious train/test leakage risk,
   but the split is still by unique card name as a free hygiene practice. Basic lands are
@@ -218,12 +233,6 @@ main(
   prevalence weighting, or an "unless/if" flag that can't distinguish restrictive
   clauses from bonus ones), empirically search a broad candidate keyword/pattern list
   for real correlation with the GP-vs-IIH residual *before* encoding anything.
-- **Richer contrastive formulation**: the simple pairwise soft-target version tried
-  (`exp(-|target_gap|/tau)`) showed no reproducible effect across 12 runs. **Now
-  implemented** as `train_lora.py`'s `triplet_weight`/`mine_hard_triplets` (periodic
-  hard-negative mining: same-text/different-outcome pairs like Annul/Protect-the-
-  Negotiators) — smoke-tested only so far, not yet run for a real result or
-  multi-seed-confirmed.
 - **v2 richer color-pair grouping** for the (currently not-adopted) trainable attention
   line: group by 2-color archetype pairs instead of single primary color — never built,
   the single-color version was meant as the simpler stepping stone and was abandoned
