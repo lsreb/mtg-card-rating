@@ -23,7 +23,7 @@ from mtg_rating.labels import compute_card_metrics
 SET_CODES = [
     "FDN", "DSK", "BLB", "OTJ", "MKM", "LCI", "WOE", "MOM", "ONE", "BRO", "DMU",
     "SNC", "NEO", "VOW", "MID", "AFR", "STX", "KHM", "EOE", "TLA", "FIN", "TDM",
-    "DFT", "SOS", "TMT", "ECL",
+    "DFT", "SOS", "TMT", "ECL", "MSH",
 ]
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
