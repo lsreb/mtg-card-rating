@@ -18,10 +18,11 @@ relative to the L2-normalized LoRA text embedding before concatenation and takin
 Euclidean distance. Both `k` and `structured_weight` are swept and picked by val
 score (never test), same discipline as every other hyperparameter in this project.
 
-`checkpoint_dir` (default rate_set.CHECKPOINT_DIR) must be a checkpoint trained on the
-same split this script rebuilds -- otherwise "val" cards may have been training cards
-and the NN reference is contaminated. Even then the NN val number is mildly
-optimistic (val picked its best epoch), as is the KNN one (val picked its best k).
+`checkpoint_dir` (default rate_set.CHECKPOINT_DIR) is the checkpoint under test. The
+dataset is rebuilt from the sets it was trained on (recorded in the checkpoint;
+`set_codes` overrides, see train_lora.resolve_training_sets), so "val" really is its
+own held-out split. Even then the NN val number is mildly optimistic (val picked its
+best epoch), as is the KNN one (val picked its best k).
 
 Run with: conda run -n env_coinche python -m mtg_rating.knn_baseline
 """

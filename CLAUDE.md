@@ -214,8 +214,9 @@ pinned down precisely.
 **Which pool these numbers belong to**: this checkpoint was trained (2026-07-29) on the 26
 sets that were in `SET_CODES` then — every current set except MSH, added 2026-08-20 — and the
 1303 test rows are that 26-set pool's split (1271 test names). Re-measuring today by simply
-calling `build_dataset()` yields a *different* split (see the split-drift note under Key
-established facts), not this one; restrict the dataset to those 26 sets to reproduce it.
+calling `build_dataset()` would yield a *different* split (see the split-drift note under Key
+established facts); the diagnostics avoid that by rebuilding from the pool recorded in the
+checkpoint's `head.pt` (backfilled 2026-09-21), or restrict the dataset to those 26 sets by hand.
 
 ## Key established facts (don't re-litigate without new evidence)
 

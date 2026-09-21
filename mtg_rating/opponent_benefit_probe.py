@@ -13,8 +13,9 @@ Groups every pooled train+val card into one of four buckets by scanning for
 "opponent"/"opponents" followed within 3 words by a benefit verb (creates, draws,
 gains, ...) or a harm verb (loses, discards, sacrifices, ...), then compares mean
 prediction residual (actual - predicted GP WR rating, from `checkpoint_dir`,
-default rate_set.CHECKPOINT_DIR -- it must be the checkpoint trained on the same
-split this script rebuilds) across buckets. Read-only diagnostic, no training,
+default rate_set.CHECKPOINT_DIR; the dataset is rebuilt from the sets that
+checkpoint was trained on, so the split is its own -- see
+train_lora.resolve_training_sets) across buckets. Read-only diagnostic, no training,
 same residual computation as feature_search.py, so the same caveat applies: train
 rows are in-sample for the checkpoint and their residuals are deflated.
 

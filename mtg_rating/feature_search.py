@@ -2,8 +2,10 @@
 GP WR prediction residual -- the automatic candidate-search half of the "validated
 feature engineering" plan (see CLAUDE.md's under-dispersion discussion). Read-only
 diagnostic, no training: loads a trained checkpoint (`checkpoint_dir`, default
-rate_set.CHECKPOINT_DIR -- use the checkpoint trained on the *same split* this
-script rebuilds, or its residuals are contaminated), computes
+rate_set.CHECKPOINT_DIR), rebuilds the dataset from the sets it was trained on
+(recorded in the checkpoint; `set_codes` overrides, see
+train_lora.resolve_training_sets) so the by-name split is the checkpoint's own,
+and computes
 residual = actual_gp_wr_rating - predicted_gp_wr_rating (both on the model's own
 0-10 scale, via the checkpoint's own mu/sigma) for every train/val card, then
 correlates every single-word/bigram pattern that appears often enough in
