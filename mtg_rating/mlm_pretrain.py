@@ -142,9 +142,9 @@ def main(
     lora_rank: int = LORA_RANK,
 ):
     torch.manual_seed(seed)
-    output_dir = output_dir or OUTPUT_DIR
+    output_dir = Path(output_dir or OUTPUT_DIR)  # accept str or Path
     if checkpoint_every:
-        checkpoint_root = checkpoint_root or OUTPUT_DIR.parent / "minilm_mtg_pretrained_checkpoints"
+        checkpoint_root = Path(checkpoint_root or OUTPUT_DIR.parent / "minilm_mtg_pretrained_checkpoints")
 
     cards = fetch_bulk_oracle_cards()
     texts = [c["oracle_text"] for c in cards]

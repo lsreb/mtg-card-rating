@@ -4,7 +4,7 @@ mean, this groups a card with only the commons/uncommons that share its
 color, so the model can pick up genuine archetype-support signal instead of a
 flat "whole set vibe" average.
 
-v1 scope, deliberately narrow (see project discussion, premier_jet.md
+v1 scope, deliberately narrow (see project discussion, design_notes.md
 section 6): each card is assigned to exactly one bucket, its *primary* color
 (colors[0] in Scryfall's WUBRG-ordered `colors` list, or "colorless" if
 colorless) -- a two-color gold card is grouped with its first color only, not
@@ -17,7 +17,7 @@ buckets processed at different training steps.
 Still a *trainable* mechanism (unlike set_context's fixed mean), so it
 inherits the same generalization caveat that ruled out full cross-card
 attention earlier in this project: attention weights are fit from the content
-of only ~26 sets' worth of distinct card pools. Cards within one bucket share
+of only a couple dozen sets' worth of distinct card pools. Cards within one bucket share
 a near-identical informant pool, so their prediction errors are correlated --
 the effective sample size for validating whether the mechanism generalizes to
 a genuinely unseen set is somewhere between the card count (~6500) and the

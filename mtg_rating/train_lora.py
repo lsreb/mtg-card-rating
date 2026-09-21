@@ -157,7 +157,7 @@ def weighted_mse_loss(
     (matches plain MSE) for small errors, but bends over to a concave,
     flattening shape and saturates to a fixed asymptote A for large ones,
     instead of growing without bound. Designed together with the user from
-    three explicit constraints: inflection exactly at |e|=1 (premier_jet.md's
+    three explicit constraints: inflection exactly at |e|=1 (design_notes.md's
     "worse than 1 is a fail" threshold, in rating-scale units) -- which fixes
     B = 3*(inflection_x)^2 = 3 algebraically, independent of A -- and a slope
     of 3 *at* that inflection point, which (given B=3) fixes A = 8 (since
@@ -168,7 +168,7 @@ def weighted_mse_loss(
     combined, this saturating shape supersedes it as the more principled
     version.
 
-    threshold_penalty_weight (default 0, disabled): per premier_jet.md's own
+    threshold_penalty_weight (default 0, disabled): per design_notes.md's own
     note ("if a rating prediction is worse than 1, it's a fail"), an extra
     hinge-squared term -- max(0, |pred-target| - threshold)^2 -- added on top
     of the base error term. Exactly zero contribution (and zero gradient) for
@@ -316,8 +316,13 @@ def save_checkpoint(
     extra_formulas: list = None,
     extra_mus: list = None,
     extra_sigmas: list = None,
+    set_codes: list = None,
+    split_mode: str = None,
+    split_seed: int = None,
+    val_fraction: float = None,
+    test_fraction: float = None,
 ):
-    checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
+    checkpoint_dir = Path(checkpoint_dir or CHECKPOINT_DIR)  # accept str or Path
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     # LoRA adapter alone (a few 10s of KB) rather than the full 22.7M-param frozen
     # base -- that's the whole point of only training rank-4 adapters.
@@ -342,6 +347,17 @@ def save_checkpoint(
             "extra_formulas": extra_formulas or [],
             "extra_mus": extra_mus or [],
             "extra_sigmas": extra_sigmas or [],
+            # The pool this checkpoint was trained on and how it was split. The
+            # by-name split shuffles the *whole* list of card names, so adding a
+            # set to SET_CODES re-deals every card: without this record, a later
+            # diagnostic that rebuilds the dataset from the current SET_CODES sees
+            # val/test cards this checkpoint trained on (see resolve_training_sets).
+            # None = not recorded.
+            "set_codes": set_codes,
+            "split_mode": split_mode,
+            "split_seed": split_seed,
+            "val_fraction": val_fraction,
+            "test_fraction": test_fraction,
         },
         checkpoint_dir / "head.pt",
     )
@@ -370,7 +386,7 @@ def main(
     split_mode: str = "name",  # "name" (default, every prior result in this project) or "set" (honesty check)
     sample_weight_power: float = 0.0,  # 0 = uniform (default, unchanged behavior); >0 upweights high-game-count cards
     threshold_penalty_weight: float = 0.0,  # 0 = disabled (default); >0 adds a hinge-squared penalty beyond `threshold`
-    threshold: float = 1.0,  # rating-scale units (0-10); premier_jet.md's "worse than 1 is a fail"
+    threshold: float = 1.0,  # rating-scale units (0-10); design_notes.md's "worse than 1 is a fail"
     loss_shape: str = "mse",  # "mse" (default, unchanged) or "saturating" (Geman-McClure style, see weighted_mse_loss)
     saturating_asymptote: float = 8.0,
     saturating_scale: float = 3.0,
@@ -433,6 +449,7 @@ def main(
     # value for a formula this run actually needs, before splitting.
     all_formulas = [formula] + extra_formulas
     records = [r for r in records if all(RAW_SCORE_FORMULAS[f](r) is not None for f in all_formulas)]
+    trained_set_codes = sorted({r["set_code"] for r in records})  # recorded in the checkpoint, see save_checkpoint
 
     if split_mode == "set":
         train_sel, val_sel, test_sel = split_by_set_3way(records, VAL_FRACTION, TEST_FRACTION, SPLIT_SEED)
@@ -620,12 +637,54 @@ def main(
             model, mu, sigma, formula, checkpoint_dir=checkpoint_dir,
             base_model_path=base_model_path, use_set_context=use_set_context, use_color_context=use_color_context,
             extra_formulas=extra_formulas, extra_mus=extra_mus, extra_sigmas=extra_sigmas,
+            set_codes=trained_set_codes, split_mode=split_mode,
+            split_seed=SPLIT_SEED, val_fraction=VAL_FRACTION, test_fraction=TEST_FRACTION,
         )
     # best_val_mse is returned so a multi-seed sweep can pick which checkpoint to
     # keep by val score, not test score -- selecting on test would reintroduce
     # the exact bias early stopping was written to avoid, just at the seed level
     # instead of the epoch level.
     return model, preds, test_records, test_targets, best_val_mse
+
+
+def load_training_pool(checkpoint_dir) -> dict:
+    """What `save_checkpoint` recorded about the pool a checkpoint was trained on
+    ("set_codes", "split_mode", "split_seed", "val_fraction", "test_fraction").
+    Empty for checkpoints saved before this was tracked (e.g. the original
+    lora_joint_dual)."""
+    ckpt = torch.load(Path(checkpoint_dir) / "head.pt", map_location="cpu", weights_only=False)
+    keys = ("set_codes", "split_mode", "split_seed", "val_fraction", "test_fraction")
+    return {k: ckpt[k] for k in keys if ckpt.get(k) is not None}
+
+
+def resolve_training_sets(explicit, checkpoint_dir):
+    """The set list a diagnostic should rebuild the dataset from, so that its
+    by-name split is the checkpoint's own (see save_checkpoint for why this
+    matters). Priority: `explicit` > the sets recorded in the checkpoint > None,
+    i.e. the current SET_CODES, with a loud warning: for a checkpoint that
+    predates the record, or was trained before the pool last changed, that split
+    is NOT the checkpoint's own and val/test cards are partly in-sample."""
+    name = Path(checkpoint_dir).name
+    pool = load_training_pool(checkpoint_dir)
+    current = {"split_seed": SPLIT_SEED, "val_fraction": VAL_FRACTION, "test_fraction": TEST_FRACTION}
+    changed = {k: (pool[k], v) for k, v in current.items() if k in pool and pool[k] != v}
+    if changed:
+        print(f"[pool] WARNING: {name} was split with {{{', '.join(f'{k}={a}' for k, (a, _) in changed.items())}}} but the "
+              f"current constants are {{{', '.join(f'{k}={b}' for k, (_, b) in changed.items())}}}: the rebuilt split will not match.")
+    if pool.get("split_mode", "name") != "name":
+        print(f"[pool] WARNING: {name} was trained with split_mode={pool['split_mode']!r}; diagnostics split by name, so the rebuilt split will not match.")
+    if explicit is not None:
+        return list(explicit)
+    recorded = pool.get("set_codes")
+    if recorded:
+        if sorted(recorded) != sorted(SET_CODES):
+            print(f"[pool] {name} was trained on {len(recorded)} sets but SET_CODES now has {len(SET_CODES)}: "
+                  f"rebuilding from the checkpoint's own sets so the split matches.")
+        return list(recorded)
+    print(f"[pool] WARNING: {name} doesn't record its training sets (saved before that was tracked). Using the current "
+          f"SET_CODES ({len(SET_CODES)} sets): if the pool changed since it was trained, this is NOT its own split and "
+          f"val/test cards are partly in-sample. Pass set_codes=[...] explicitly to fix.")
+    return None
 
 
 if __name__ == "__main__":

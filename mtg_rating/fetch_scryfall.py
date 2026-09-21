@@ -8,7 +8,7 @@ used only for the handful of cards outside the training set (generalization test
 fetch_bulk_oracle_cards pulls Scryfall's "oracle_cards" bulk file -- one object per
 unique card (deduplicated by oracle_id across all reprints/printings), unlike
 fetch_set_cards' per-set search. Used for the MLM pretraining corpus (see
-mlm_pretrain.py): needs the broad historical card pool, not just the 26 sets with
+mlm_pretrain.py): needs the broad historical card pool, not just the sets with
 17Lands data. Same disk-safety pattern as the rest of the project -- the raw bulk
 file (~200MB) is deleted right after the fields actually needed are extracted, only
 the small filtered/trimmed cache is kept.

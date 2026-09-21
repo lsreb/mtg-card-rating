@@ -1,5 +1,5 @@
-Je consigne ici l'idée initiale que j'avais du projet, avant de coder.
-Je mets aussi des observations diverses et variées
+I record here my initial idea of the project, before coding.
+I also add various observations.
 
 ## 0) Unorganized thoughts
 -I should probably write in english, Magic: The Gathering is a game mostly played in english.
@@ -53,7 +53,7 @@ Je mets aussi des observations diverses et variées
 -A high play rate for a card could mean it is overplayed, and the deck it is played in are not optimized for it. The GIHWR may be lower than the actual strength of the card in this case. On the other hand, a low play rate would mean that the card is played in the appropriate builds, and the GIHWR should be indicative of its strength.
 -A card that is picked too highly relative to its strength can make a deck weaker, and the GIHWR lower for this card. This could tend to happen for "uncommon signposts", i.e., two colored cards that define an archetype, and rare or mythic cards, that players tend to overpick. 
 -There should be a very strong relationship between the pick order and the play-rate of a card. It would be interesting to look at the correlations between these data. The ALSA data for instance could then be ditched, as it is biased by players overpicking rares for raredrafting, while the play rate at least would give better ideas of card evaluation.
-Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly correlated to pick order. Pick order is however harder to compute, as it comes from the draft_data file, heavier and not that necessary. Sticking to play rate is better. -0.872 avec le ATA.
+Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly correlated to pick order. Pick order is however harder to compute, as it comes from the draft_data file, heavier and not that necessary. Sticking to play rate is better. -0.872 with ATA.
 -Low and high ratings are given with respect to some numbers of standard deviations away from the mean.
 
 ## 3.3) The actual formula
@@ -75,10 +75,10 @@ Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly co
 -Remind that we settled for IIH as a target, so that we could have a rating that would not depend on the set context, as much as possible.
 -However our final goal is still to rate the cards depending on the context of their set.
 -A possibility could be to change the output from "IIH" to the couple "(IIH, GP WR)". GP WR or GIH WR should be about the same, as their difference is somewhat proportional to IIH. This could make IIH harder to learn. The network may need extra help (attention?) to work even better, use the "set code" feature.
--Plus de couches dans le MLP ? > pas très concluant pour le moment
--Plus d'epochs de pretraining ? > Pas avec lora64
--Un mécanisme d'attention pour mieux intégrer le contexte ?
--Apprendre GP ? > sortie couple, pas vraiment de gain ni de perte prouvée sur Lora32 pretrain. Good with Lora64, mandatory even.
+-More layers in the MLP? > not very conclusive so far
+-More pretraining epochs? > Not with lora64
+-An attention mechanism to better integrate the context?
+-Learn GP? > paired output, no real proven gain or loss on Lora32 pretrain. Good with Lora64, mandatory even.
 -Lora pretrain 64? > works well to predict the couple IIH GP, not IIH on its own. We may see this as an auxiliary task. Add more auxiliary tasks? > Play rate doesn't bring much.
 -Open question: compute the mean IIH of commons and uncommons, or a similar metric, for a set, compare it to the color winrate, its correlation > in MSH, W IIH is not that good, while B is pretty good. My interpretation is that black decks are generally rather bad...
 -Display: display the ratings result as a list by color, that can be opened in html, strong cards to weak cards.
@@ -87,6 +87,6 @@ Conclusion: in ECL, with a Pearson correlation of -0.836, play rate is highly co
 
 ## 6) Attention?
 
--Prompt?: contexte : mon objectif est de calculer des ratings pour des cartes magic the gathering en entrainant un réseau de neurones, qui prendrait en données les cartes à rate, et renverrait ce rating inspiré des GP winrate de 17lands par exemple. L'estimation de ce GP est assez biaisée par la force des couleurs dans les sets de carte, j'aimerais donc que le réseau soit capable de lui même de trouver dans un set quelle couleur est la plus forte. Il doit donc être capable d'étudier plusieurs cartes simultanément. Actuellement, je pars d'un miniLM pretrain avec LoRA sur 64 ranks sur l'encyclopédie de scryfall. Pour l'entrainement en question, je fais du Lora 16 sur cette partie du réseau, et je rajoute une tête MLP par dessus. Pour prendre en compte le contexte, il y a une étape de plus où chaque set a ses cartes moyennées en une vecteur qui passe en donnée supplémentaire pour chaque carte du set, pour donner du contexte. J'aimerais une autre façon de faire qui permette de mieux lire les synergies entre les cartes
-- La réponse au prompt précédent recommande de faire du Set-Transformer (option A) ou du GNN (option B). L'option A semble la plus simple à implémenter mais scale en N carré pour le temps/mémoire, où N est le nombre de cartes passées en même temps. Il est donc peut-être plus raisonnable de passer les cartes d'une couleur seulement, voire même de retirer les rares et mythiques si on teste ça. L'option B nécessite de construire le graphe soi-même, ce qui se rapproche en fait de l'option de simplification envisagée de l'option A, et de restreindre soi même drastiquement le nombre d'arêtes, qu idétermine le scaling aussi. Peut-être par archétype aussi.
-- Globalement overfit, trop imprécis malgré plusieurs pistes de compensation. Piste généralement abandonnée.
+-Prompt?: context: my goal is to compute ratings for Magic: The Gathering cards by training a neural network that would take the cards to rate as input and return a rating inspired by 17lands' GP winrate, for example. The estimate of this GP is fairly biased by the strength of the colors in the card sets, so I would like the network to be able to find by itself which color is the strongest in a set. It must therefore be able to look at several cards simultaneously. Currently, I start from a MiniLM pretrained with LoRA at rank 64 on the Scryfall encyclopedia. For the training in question, I use LoRA 16 on that part of the network, and add an MLP head on top. To take context into account, there is one more step where each set has its cards averaged into a single vector that is passed as extra input for each card of the set, to provide context. I would like another approach that reads the synergies between cards better.
+- The answer to the previous prompt recommends a Set-Transformer (option A) or a GNN (option B). Option A seems the simplest to implement but scales quadratically in time/memory with N, the number of cards passed at once. It may therefore be more reasonable to pass the cards of a single color only, or even to drop the rares and mythics if we test this. Option B requires building the graph yourself, which in fact comes close to the simplification envisaged for option A, and to drastically restricting the number of edges yourself, which also determines the scaling. Perhaps by archetype as well.
+- Overall overfit, too imprecise despite several compensation attempts. Approach generally abandoned.

@@ -8,7 +8,7 @@ A neural card-rating tool for Magic: The Gathering limited/draft. Given a card's
 data (mana cost, type, oracle text, rarity, P/T), it predicts a 0-10 rating meant to
 generalize to cards from **not-yet-released** sets. Training labels come from 17Lands'
 public Premier Draft `game_data` (win-rate metrics), features from Scryfall. See
-`premier_jet.md` for the original, informal design notes (kept as-is, worth reading for
+`design_notes.md` for the original, informal design notes (kept as-is, worth reading for
 the "why" behind several decisions below) and `regles_coinche.md`-style project memory
 (in the auto-memory system, not this repo) for the full experimental history — this file
 is a condensed, current-state summary, not a replacement for that history.
@@ -42,7 +42,7 @@ Run from the repo root, e.g. `conda run -n env_coinche python -m mtg_rating.trai
   for another set) — loads the `lora_joint_dual` checkpoint, rates every card of the given
   set, and writes `data/ratings/ratings_<set>.html`: one table per primary color (WUBRG
   first-color grouping, see `color_context.primary_color`), sorted strongest to weakest by
-  predicted GP WR (IIH shown alongside). premier_jet.md section 5's original display idea.
+  predicted GP WR (IIH shown alongside). design_notes.md section 5's original display idea.
   Needs only Scryfall data for that set, no 17Lands labels — works on any set, including
   ones outside `multiset.SET_CODES` with no draft history yet.
 
@@ -241,6 +241,6 @@ pinned down precisely.
   itself — currently single-seed, directionally very likely real (consistent across
   every regularization variant tried) but never formally 3-seed-confirmed the way most
   other findings in this project have been.
-- **Secondary objectives from the original design notes** (`premier_jet.md` §1.2),
+- **Secondary objectives from the original design notes** (`design_notes.md` §1.2),
   untouched so far: short natural-language card descriptions/characteristics alongside
   the numeric rating, set-dependent metagame prediction, draft-bot integration.

@@ -4,7 +4,7 @@ for set-level effects (color distribution, curve, thematic keywords) without
 needing per-card synergy detection.
 
 Deliberately simple, per project discussion: a full cross-card attention
-mechanism was considered and rejected -- with only 26 sets total, splitting
+mechanism was considered and rejected -- with only ~26 sets total (26 when this was decided, 27 now), splitting
 train/val/test at the *set* level (required if cards within a set must be
 seen together) would leave ~18 training sets, far too few to learn a
 generalizable attention mechanism. A plain mean over the set's own cards has

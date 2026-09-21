@@ -120,7 +120,7 @@ class GradientReversalLayer(nn.Module):
     gradient flows back through it. Used by train_color_context.py's DANN mode
     to push ColorAttentionContext's output towards not encoding which set a
     card came from -- see that module for why set-identity is a real shortcut
-    risk given only ~18-26 distinct sets. `lambda_` is meant to be ramped up
+    risk given only a couple dozen distinct sets (fewer still on a by-set split's train side). `lambda_` is meant to be ramped up
     over training (0 -> 1), not held constant -- adversarial pressure against
     an undertrained encoder early on is a known destabilizer."""
 

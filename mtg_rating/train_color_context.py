@@ -1,6 +1,6 @@
 """Trainable per-color cross-attention context (color_context.py) + rating head,
 trained jointly with the rank-4 rating LoRA -- v1 of the "synergy" direction from
-premier_jet.md section 6, an alternative to set_context.py's fixed whole-set mean.
+design_notes.md section 6, an alternative to set_context.py's fixed whole-set mean.
 
 Batching differs from train_lora.py's flat shuffled-32-card batches: a bucket (one
 set's cards of one primary color, see color_context.py) is the natural unit here,
@@ -190,7 +190,7 @@ def evaluate(model, color_context, records, buckets, targets_by_index, device):
 
 
 def save_checkpoint(model, color_context, mu, sigma, formula, checkpoint_dir=None, base_model_path=MODEL_NAME):
-    checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
+    checkpoint_dir = Path(checkpoint_dir or CHECKPOINT_DIR)  # accept str or Path
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     model.text_encoder.model.save_pretrained(checkpoint_dir / "lora_adapter")
     torch.save(
@@ -288,9 +288,9 @@ def main(
 
     dann = None
     if use_dann:
-        # Domains = whichever sets actually appear in train_indices -- 26 under
-        # split_mode="name" (train rows are spread across every set), ~18 under
-        # split_mode="set" (only the train-held sets appear at all). Built from
+        # Domains = whichever sets actually appear in train_indices -- every pooled
+        # set under split_mode="name" (train rows are spread across every set), only
+        # the train-held sets (~70%) under split_mode="set". Built from
         # train_indices rather than train_sel directly so this is correct under
         # either split_mode without a special case.
         domain_codes = sorted({records[i]["set_code"] for i in train_indices})

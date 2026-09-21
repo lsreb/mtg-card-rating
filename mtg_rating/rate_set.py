@@ -1,10 +1,10 @@
 """Rate every card of one Magic set and render the result as a standalone HTML
 page, grouped by color (mono-color cards under their one color, multicolor and
 colorless cards in their own separate sections -- see display_group), strongest
-to weakest (premier_jet.md section 5's original display idea).
+to weakest (design_notes.md section 5's original display idea).
 
 Needs only Scryfall data for the target set -- no 17Lands labels -- so it works
-on a set with no draft history yet, not just the 26 sets in multiset.SET_CODES
+on a set with no draft history yet, not just the sets in multiset.SET_CODES
 that train_lora.py trains on. Uses the dual iih_only/gp_wr_only checkpoint at
 data/models/lora_joint_dual/ (CLAUDE.md's "Current best-known config") by
 default; pass a different checkpoint_dir to rate with another one.
@@ -74,8 +74,8 @@ def _usable_cards(set_code: str) -> list:
 
 def _context_vector_for_set(set_code: str, cards: list) -> list:
     # Reuse set_context.py's shared cache when this set is already one of the
-    # 26 pooled training sets -- the exact vector the checkpoint trained
-    # against. For any other set (the actual not-yet-released-set use case),
+    # pooled sets in multiset.SET_CODES -- the same whole-set mean the checkpoint
+    # trained against (or would have, for a set added after it was trained). For any other set (the actual not-yet-released-set use case),
     # compute the same whole-set mean fresh instead of writing into that
     # shared cache file: a partial, single-set write would silently poison it
     # for every other script that trusts it as "the full pool" (see
@@ -91,6 +91,7 @@ def _context_vector_for_set(set_code: str, cards: list) -> list:
 
 
 def load_model(checkpoint_dir: Path = CHECKPOINT_DIR):
+    checkpoint_dir = Path(checkpoint_dir)  # accept str or Path
     ckpt = torch.load(checkpoint_dir / "head.pt", map_location="cpu", weights_only=False)
     if ckpt.get("extra_formulas"):
         extra_formulas = ckpt["extra_formulas"]
@@ -150,8 +151,8 @@ def attach_actual_ratings(ratings: list, set_code: str, formulas: list, norm_par
     the public dataset actually has PremierDraft data for this card -- silently
     leaves it unset otherwise (a brand-new, not-yet-released set, or one
     17Lands never covered), per the user's "if you know it" framing. Reuses
-    get_set_metrics' existing cache, so this is free for any of the 26 sets
-    train_lora.py already trains on, and a normal (small, disk-safe,
+    get_set_metrics' existing cache, so this is free for any set in multiset.SET_CODES
+    (the sets train_lora.py trains on), and a normal (small, disk-safe,
     auto-deleted) one-time download for any other set 17Lands does have data
     for."""
     try:
@@ -214,7 +215,7 @@ def render_html(set_code: str, by_color: dict, formulas: list, primary_metric: s
         )
         footer = (
             '<tfoot><tr class="avg-row">'
-            '<td></td><td class="name">Moyenne couleur</td><td></td><td></td><td></td>'
+            '<td></td><td class="name">Color average</td><td></td><td></td><td></td>'
             f"{footer_cells}</tr></tfoot>"
         )
         sections.append(
@@ -275,7 +276,7 @@ def main(set_code: str, checkpoint_dir: Path = CHECKPOINT_DIR, out_path: Path = 
     for color_ratings in by_color.values():
         color_ratings.sort(key=lambda e: e[primary_metric], reverse=True)
 
-    out_path = out_path or (OUT_DIR / f"ratings_{set_code.lower()}.html")
+    out_path = Path(out_path or (OUT_DIR / f"ratings_{set_code.lower()}.html"))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(render_html(set_code, by_color, formulas, primary_metric))
     print(f"[rate_set] wrote {out_path}")
