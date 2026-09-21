@@ -1,7 +1,9 @@
 """Screen oracle-text patterns for correlation with the current best checkpoint's
 GP WR prediction residual -- the automatic candidate-search half of the "validated
 feature engineering" plan (see CLAUDE.md's under-dispersion discussion). Read-only
-diagnostic, no training: loads the lora_joint_dual checkpoint, computes
+diagnostic, no training: loads a trained checkpoint (`checkpoint_dir`, default
+rate_set.CHECKPOINT_DIR -- use the checkpoint trained on the *same split* this
+script rebuilds, or its residuals are contaminated), computes
 residual = actual_gp_wr_rating - predicted_gp_wr_rating (both on the model's own
 0-10 scale, via the checkpoint's own mu/sigma) for every train/val card, then
 correlates every single-word/bigram pattern that appears often enough in
@@ -12,7 +14,9 @@ wasn't scored on before being reported as a real candidate. This replaces guessi
 approximate -- see project history) with a systematic scan; a human still has to
 sanity-check the survivors before encoding any of them as real structured
 features -- this script only ranks candidates, it doesn't add anything to the
-model.
+model. Caveat: train rows are in-sample for the checkpoint, so their residuals
+are deflated relative to genuinely held-out cards; the val column is the clean
+one.
 
 Run with: conda run -n env_coinche python -m mtg_rating.feature_search
 """
@@ -25,10 +29,10 @@ import torch
 
 from mtg_rating.features import structured_features
 from mtg_rating.multiset import build_dataset
-from mtg_rating.rate_set import load_model
+from mtg_rating.rate_set import CHECKPOINT_DIR, load_model
 from mtg_rating.ratings import RAW_SCORE_FORMULAS, apply_normalization
 from mtg_rating.set_context import compute_set_context_vectors
-from mtg_rating.train_lora import SPLIT_SEED, TEST_FRACTION, VAL_FRACTION, iter_batches, split_by_name_3way
+from mtg_rating.train_lora import SPLIT_SEED, TEST_FRACTION, VAL_FRACTION, iter_batches, resolve_training_sets, split_by_name_3way
 from mtg_rating.train_multiset import pearson
 
 TARGET_FORMULA = "gp_wr_only"
@@ -91,14 +95,14 @@ def _score_patterns(train_records, train_residuals, val_records, val_residuals) 
     return rows
 
 
-def main(top_n: int = TOP_N):
-    model, formulas, use_set_context, norm_params = load_model()
+def main(top_n: int = TOP_N, checkpoint_dir=CHECKPOINT_DIR, set_codes=None):
+    model, formulas, use_set_context, norm_params = load_model(checkpoint_dir)
     if TARGET_FORMULA not in formulas:
         raise ValueError(f"checkpoint wasn't trained with {TARGET_FORMULA}: formulas={formulas}")
     target_idx = formulas.index(TARGET_FORMULA)
     mu, sigma = norm_params[target_idx]
 
-    records = build_dataset()
+    records = build_dataset(resolve_training_sets(set_codes, checkpoint_dir))
     for r in records:
         r["structured"] = structured_features(r["scryfall_card"])
         r["oracle_text"] = r["scryfall_card"].get("oracle_text", "") or ""
@@ -106,7 +110,8 @@ def main(top_n: int = TOP_N):
         set_context_vectors = compute_set_context_vectors(records)
         for r in records:
             r["set_context"] = set_context_vectors[r["set_code"]]
-    records = [r for r in records if RAW_SCORE_FORMULAS[TARGET_FORMULA](r) is not None]
+    # Same filter as train_lora.main (every formula the checkpoint outputs), so the by-name split matches.
+    records = [r for r in records if all(RAW_SCORE_FORMULAS[f](r) is not None for f in formulas)]
 
     train_sel, val_sel, _test_sel = split_by_name_3way(records, VAL_FRACTION, TEST_FRACTION, SPLIT_SEED)
     train_records = [r for r in records if r["name"] in train_sel]

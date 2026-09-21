@@ -6,8 +6,9 @@ to weakest (design_notes.md section 5's original display idea).
 Needs only Scryfall data for the target set -- no 17Lands labels -- so it works
 on a set with no draft history yet, not just the sets in multiset.SET_CODES
 that train_lora.py trains on. Uses the dual iih_only/gp_wr_only checkpoint at
-data/models/lora_joint_dual/ (CLAUDE.md's "Current best-known config") by
-default; pass a different checkpoint_dir to rate with another one.
+data/models/lora_joint_dual_msh/ (trained on all 27 sets; CLAUDE.md's "Current
+baseline") by default; pass a different checkpoint_dir to rate with another one,
+e.g. the older 26-set data/models/lora_joint_dual/.
 
 Run with: conda run -n env_coinche python -m mtg_rating.rate_set
 """
@@ -29,7 +30,7 @@ from mtg_rating.ratings import RAW_SCORE_FORMULAS, apply_normalization
 from mtg_rating.set_context import CACHE_PATH as SET_CONTEXT_CACHE_PATH, CONTEXT_DIM, _mean_vector
 from mtg_rating.text_embeddings import embed_texts
 
-CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / "data" / "models" / "lora_joint_dual"
+CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / "data" / "models" / "lora_joint_dual_msh"
 OUT_DIR = Path(__file__).resolve().parent.parent / "data" / "ratings"
 BATCH_SIZE = 32
 COLOR_ORDER = ["W", "U", "B", "R", "G", "multicolor", "colorless"]

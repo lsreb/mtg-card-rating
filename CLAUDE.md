@@ -36,15 +36,23 @@ Run from the repo root, e.g. `conda run -n env_coinche python -m mtg_rating.trai
 - **Frozen-embedding baseline**: `python -m mtg_rating.train_multiset` — the older,
   simpler pipeline (frozen MiniLM, no LoRA fine-tuning), kept for comparison.
 - **Experimental trainable-attention pipeline**: `python -m mtg_rating.train_color_context`
-  — not part of the adopted config (see Status below), kept for any future revisit.
+  — not part of the adopted config (see Key established facts below), kept for any future revisit.
 - **Rate a whole set and render an HTML list**: `python -m mtg_rating.rate_set` (edit the
   `main("DFT")` call at the bottom, or `python -c 'from mtg_rating.rate_set import main; main("MKM")'`
-  for another set) — loads the `lora_joint_dual` checkpoint, rates every card of the given
-  set, and writes `data/ratings/ratings_<set>.html`: one table per primary color (WUBRG
-  first-color grouping, see `color_context.primary_color`), sorted strongest to weakest by
-  predicted GP WR (IIH shown alongside). design_notes.md section 5's original display idea.
+  for another set) — loads the `lora_joint_dual_msh` checkpoint, rates every card of the given
+  set, and writes `data/ratings/ratings_<set>.html`: one table per color group (each of
+  WUBRG, plus separate multicolor and colorless sections, see `rate_set.display_group`),
+  sorted strongest to weakest by predicted GP WR (IIH shown alongside, the real 17Lands
+  value in parentheses when one exists). design_notes.md section 5's original display idea.
   Needs only Scryfall data for that set, no 17Lands labels — works on any set, including
   ones outside `multiset.SET_CODES` with no draft history yet.
+- **Diagnostics on a checkpoint** (read-only, no training): `python -m mtg_rating.feature_search`,
+  `python -m mtg_rating.opponent_benefit_probe`, `python -m mtg_rating.knn_baseline`. Each has
+  `main(checkpoint_dir=...)`, defaulting to `rate_set.CHECKPOINT_DIR` (`lora_joint_dual_msh`,
+  the 27-set baseline). They rebuild the dataset from the sets recorded in the checkpoint (`train_lora.resolve_training_sets`;
+  both existing checkpoints were backfilled 2026-09-21, pools verified against their recorded split row
+  counts), so the split is the checkpoint's own. A checkpoint with no record falls back to the current
+  `SET_CODES` with a warning; `set_codes=` overrides (split-drift note under Key established facts).
 
 No automated test suite. Verification throughout this project has been: build a
 `train_lora.main()` (or similar) call, run it, inspect val/test MSE and Pearson r printed
@@ -91,17 +99,16 @@ result — see "By-name vs by-set" below, this has bitten the project multiple t
 - **`model_joint.py`** — the main model classes:
   - `CardRatingNetJoint`: `LoraTextEncoder` output + `structured_features` (+ optional
     concatenated context vector) → MLP head (`hidden_dims=[16]` default — deeper heads
-    tested and rejected, see Status) → 1 or N outputs.
+    tested and rejected) → 1 or N outputs.
   - `ColorAttentionContext`, `DomainClassifier`, `GradientReversalLayer`: built for the
     experimental trainable per-card-color attention + DANN line of work. **Not part of
-    the adopted config** — see Status.
+    the adopted config** — see Key established facts.
 - **`set_context.py`** — non-parametric (zero trainable parameters) context vectors,
   concatenated to a card's own features before the head:
   - `compute_set_context_vectors`: mean of (structured + frozen text embedding) over a
     whole set. **Adopted**, part of the best-known config.
   - `compute_per_color_context_vectors`: same idea, grouped by (set, primary color)
-    instead of whole-set. Tried, not adopted (no clear win over the whole-set version,
-    see Status).
+    instead of whole-set. Tried, not adopted (no clear win over the whole-set version).
   - Both cache to `data/raw/*.json`, keyed by file existence only (not content
     coverage) — **regenerating with a different/smaller `set_codes` subset silently
     creates a stale cache**; always delete the cache file if changing what it should
@@ -112,8 +119,9 @@ result — see "By-name vs by-set" below, this has bitten the project multiple t
 - **`ratings.py`** — `RAW_SCORE_FORMULAS` (named formulas like `iih_only`, `gp_wr_only`,
   `gih_iih`, combinations) and 0-10 normalization (`5 = mean`, `0`/`10` = `mean ± 3·std`
   of that formula's own raw-score distribution, clipped).
-- **`multiset.py`** — `build_dataset()`: pools per-card records across `SET_CODES` (26
-  sets, Alchemy and draft-innovation products excluded by rule). Caches per-set metrics
+- **`multiset.py`** — `build_dataset()`: pools per-card records across `SET_CODES` (27
+  sets as of MSH's addition on 2026-08-20; Alchemy and draft-innovation products excluded by
+  rule). Caches per-set metrics
   as small CSVs.
 - **`train_lora.py`** — **the main production training script.** `main()` builds the
   pooled dataset, splits by card name (default) or by whole set (`split_mode="set"`,
@@ -121,14 +129,14 @@ result — see "By-name vs by-set" below, this has bitten the project multiple t
   (LoRA slower than the fresh head), early stopping on val MSE (never test), and several
   opt-in-only loss variants (`sample_weight_power`, `threshold_penalty_weight`,
   `loss_shape="saturating"`, `contrastive_weight`, `triplet_weight`) — **all default to
-  plain unweighted MSE, none of them confirmed to help, see Status.** `triplet_weight`
+  plain unweighted MSE, none of them confirmed to help, see Key established facts.** `triplet_weight`
   is the newest: `mine_hard_triplets` periodically (`triplet_mining_every`, default every
   epoch) re-embeds the whole train set to find each card's hardest same-text/different-
   outcome negative (the Annul-probe failure pattern), paired with its closest-real-target
   positive (no embedding search needed for that half); `triplet_loss` is a standard
   cosine-distance margin loss on those mined triples. Sharper-targeted successor to
   `contrastive_weight`'s random-in-batch-pairs version (which showed no reproducible
-  effect across 12 runs) — **tried, ruled out** (see Status): no benefit at
+  effect across 12 runs) — **tried, ruled out** (see Key established facts): no benefit at
   `weight=1.0/margin=0.5` (2 seeds), and monotonically *worse* (both IIH and GP WR) at
   `weight=5.0/margin=1.0`, consistent with fighting the main objective rather than
   complementing it on this little trainable capacity, not just an under-tuned weight.
@@ -144,8 +152,29 @@ result — see "By-name vs by-set" below, this has bitten the project multiple t
   format and the older single-`second_formula` shape `lora_joint_dual/head.pt` was saved
   with), rates every non-basic-land card of a given set (`rate_cards`), and renders
   `render_html`'s per-color (strong-to-weak) HTML table. `_context_vector_for_set` reuses
-  `set_context.py`'s cached whole-set vector for the 26 pooled sets, or computes the same
+  `set_context.py`'s cached whole-set vector for any set in `SET_CODES`, or computes the same
   mean fresh — without writing to that shared cache — for any other set.
+- **`feature_search.py`, `opponent_benefit_probe.py`, `knn_baseline.py`** — read-only
+  diagnostics on a trained checkpoint (`checkpoint_dir`; no training), written to investigate
+  GP WR misses first noticed by eye on MSH (findings under Key established facts). All three
+  call `rate_set.load_model` and rebuild the dataset through
+  `multiset.build_dataset(train_lora.resolve_training_sets(set_codes, checkpoint_dir))`, keeping
+  the records that have every formula the checkpoint outputs (train_lora's own filter);
+  `opponent_benefit_probe` also imports helpers from `feature_search`.
+  - `feature_search.py`: residual = actual − predicted `gp_wr_only` rating (0-10 scale, via
+    the checkpoint's own mu/sigma). Every single word and bigram of `oracle_text` (reminder
+    text stripped) with enough support (≥30 train, ≥8 val cards) is correlated against it on
+    train; a pattern counts as "confirmed" only with the same sign and |r| ≥ 0.05 on val. It
+    only ranks candidates, it adds nothing to the model. Train rows are in-sample for the
+    checkpoint (deflated residuals), so the val column is the clean one.
+  - `opponent_benefit_probe.py`: one targeted hypothesis, from The Sentry, Golden Guardian
+    (reads as strong text but gives the *opponent* a 5/5 flying indestructible token). Buckets
+    cards by whether "opponent(s)" is followed within 3 words by a benefit verb, a harm verb,
+    neither, or does not appear at all, and compares the mean residual per bucket.
+  - `knn_baseline.py`: "closest comparable card" retrieval — k-NN over z-scored structured
+    features plus the checkpoint's own fine-tuned LoRA text embedding (grid k ∈ {3, …, 200}
+    × structured weight ∈ {1, 3, 10}, plus an NN+kNN blend at the val-best config), compared
+    on val against the network's own head.
 
 ## Current best-known config
 
@@ -153,8 +182,9 @@ Rank-4 rating LoRA on the rank-64/epoch-4 MLM-pretrained base
 (`data/models/minilm_mtg_pretrained_rank64_checkpoints/epoch4/`) + whole-set
 `set_context` mean + dual `(iih_only, gp_wr_only)` output, plain MSE loss, 70/10/20
 split by card name (`SPLIT_SEED=42`), head `[16]`, no dropout, differential LR
-(LoRA 2e-4 / head 1e-3), early stopping (patience 8). Checkpoint at
-`data/models/lora_joint_dual/`. Equivalent to:
+(LoRA 2e-4 / head 1e-3), early stopping (patience 8). Two checkpoints of this config exist,
+trained on different pools: `data/models/lora_joint_dual/` (26 sets, before MSH) and
+`data/models/lora_joint_dual_msh/` (27 sets — **the current baseline**, see below). Equivalent to:
 
 ```python
 from mtg_rating.train_lora import main
@@ -165,12 +195,27 @@ main(
 )
 ```
 
-Exact test-set performance of this checkpoint (1303 test rows, `SPLIT_SEED=42`,
+**Current baseline: `lora_joint_dual_msh`** (trained 2026-09-21; seed 0; 27-set pool; 4729 /
+679 / 1356 train / val / test rows, `SPLIT_SEED=42`; best val epoch 13, early stop at epoch 21,
+~6 min on the GTX 1660 Super). Saved by adding `checkpoint_dir="data/models/lora_joint_dual_msh"`
+to the call above (str or `Path`; coerced since 2026-09-21, before that a str crashed at the very end of training). Test
+performance: combined MSE 1.820; `iih_only` MSE 1.597, r 0.599; `gp_wr_only` MSE 2.043,
+r 0.469. Single seed. Compare new experiments against this, on this split; the numbers in
+the next paragraph belong to the 26-set checkpoint's own, different split and are not
+comparable to it.
+
+Exact test-set performance of the 26-set `lora_joint_dual` checkpoint (1303 test rows, `SPLIT_SEED=42`,
 deterministic -- re-measured directly by loading `lora_joint_dual/head.pt` and
 evaluating, not a training-time log, since none was kept for the original run):
 combined MSE 1.727; `iih_only` MSE 1.460, r 0.630; `gp_wr_only` MSE 1.994, r 0.482.
 Matches the r range below (0.6 / 0.48-0.5) but is the first time the MSE side was
 pinned down precisely.
+
+**Which pool these numbers belong to**: this checkpoint was trained (2026-07-29) on the 26
+sets that were in `SET_CODES` then — every current set except MSH, added 2026-08-20 — and the
+1303 test rows are that 26-set pool's split (1271 test names). Re-measuring today by simply
+calling `build_dataset()` yields a *different* split (see the split-drift note under Key
+established facts), not this one; restrict the dataset to those 26 sets to reproduce it.
 
 ## Key established facts (don't re-litigate without new evidence)
 
@@ -224,6 +269,36 @@ pinned down precisely.
   hard-excluded in `labels.py` (different draw/sample dynamics, shouldn't share a
   distribution with spells). Alchemy (digital-only) and draft-innovation (MH3, LTR-style
   supplemental products) sets are excluded from `SET_CODES` by rule, not case-by-case.
+- **The by-name split depends on the whole pool of names — adding a set silently re-deals
+  every card.** `split_by_name_3way` sorts *all* unique names, shuffles them with the fixed
+  seed and slices, so any change to the pool (MSH: 26 → 27 sets, 1271 → 1324 test names)
+  changes which cards are train/val/test, not just where the new set's cards land. Measured:
+  about 70% of the 27-set val and test names were in the checkpoint's own *train* split —
+  the chance rate for a random reshuffle, since train is 70% of the names. Consequence: an
+  older checkpoint must be evaluated on the exact pool it was trained on, otherwise its
+  "held-out" numbers are largely in-sample. Since 2026-09-21 `save_checkpoint` records
+  `set_codes` and the split settings in `head.pt` (read back by `train_lora.load_training_pool` /
+  `resolve_training_sets`); the two earlier checkpoints were backfilled the same day (`lora_joint_dual`: every set except MSH,
+  `lora_joint_dual_msh`: all 27) after checking each pool reproduces its recorded split row counts.
+- **Three diagnostics on the GP WR misses, run on `lora_joint_dual_msh` (its own split), found
+  nothing that explains the big misses.** Trigger: several MSH cards flagged by eye as badly
+  rated, all confirmed against the real 17Lands data (e.g. Avengers Assemble! predicted
+  4.01/3.85 on the two outputs vs real 8.62/8.10; The Sentry, Golden Guardian predicted IIH
+  7.16 vs real 4.01; both from the 26-set checkpoint, which had never seen MSH). Train rows are
+  in-sample for the checkpoint, so val is the clean column. (1) `feature_search.py` — no
+  word/bigram pattern clears a correction for the 628 candidates. The only coherent thing is a
+  small land/mana cluster ("land", "tapped", "enters tapped", "add", "{T}: Add") with the same
+  negative residual sign on train and val, i.e. lands and mana text are slightly overrated, by
+  roughly 0.2 rating points against a residual std of ~1.25 — far too small to explain misses
+  of ±3. (2) `opponent_benefit_probe.py` — flat aggregate effect (benefit bucket mean +0.03 vs
+  +0.08 for no-"opponent" cards; n=61, std 1.68 vs 1.25). The same cards stay the worst
+  (Eiganjo Uprising, Asinine Antics, Icebreaker Kraken, Acererak the Archlich, Flumph); of those,
+  reading the real text, Flumph clearly and Eiganjo Uprising plausibly fit the "effect helps the
+  opponent" mechanism and the other three are classifier false positives (the regex ignores
+  grammatical subject and negation). (3) `knn_baseline.py` — clearly worse than the network on
+  val (best k=50: IIH MSE 2.054 / GP MSE 2.355, network 1.633 / 1.865); an NN+kNN blend at
+  weight 0.1-0.2 moves IIH MSE by about -0.02 and GP by about 0, within single-split noise —
+  not worth adopting. All single seed, single split.
 
 ## Open / not yet tried
 
@@ -232,7 +307,19 @@ pinned down precisely.
   rejected as too approximate — e.g. counting target-category keywords with no
   prevalence weighting, or an "unless/if" flag that can't distinguish restrictive
   clauses from bonus ones), empirically search a broad candidate keyword/pattern list
-  for real correlation with the GP-vs-IIH residual *before* encoding anything.
+  for real correlation with the GP-vs-IIH residual *before* encoding anything. **The search
+  itself has now been run** (`feature_search.py`, single words and bigrams, on
+  `lora_joint_dual_msh`'s own split) and found nothing reliable beyond a small land/mana
+  cluster (see Key established facts). Single words/bigrams cannot express grammatical
+  structure (negation, who an effect applies to) — the opponent probe's false positives show
+  that gap — so whether something structural (real parsing) would find more is the open
+  question; the flat-word version does not justify building features.
+- **Pin the training pool in checkpoints**: done 2026-09-21 — `save_checkpoint` records `set_codes` + split
+  settings, the diagnostics read them through `resolve_training_sets` (tested with a real 1-epoch run),
+  and both existing checkpoints were backfilled (originals backed up outside the repo). Also done:
+  `save_checkpoint`, `rate_set.load_model`/`main`, `mlm_pretrain.main` and `train_color_context.save_checkpoint`
+  coerce their directory args with `Path(...)`, so str paths work. (Retraining on all 27 sets and
+  re-running the diagnostics against it was done the same day: `lora_joint_dual_msh`.)
 - **v2 richer color-pair grouping** for the (currently not-adopted) trainable attention
   line: group by 2-color archetype pairs instead of single primary color — never built,
   the single-color version was meant as the simpler stepping stone and was abandoned

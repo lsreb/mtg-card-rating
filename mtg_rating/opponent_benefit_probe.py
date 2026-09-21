@@ -12,9 +12,11 @@ caster.
 Groups every pooled train+val card into one of four buckets by scanning for
 "opponent"/"opponents" followed within 3 words by a benefit verb (creates, draws,
 gains, ...) or a harm verb (loses, discards, sacrifices, ...), then compares mean
-prediction residual (actual - predicted GP WR rating, from the current best
-checkpoint) across buckets. Read-only diagnostic, no training, same residual
-computation as feature_search.py.
+prediction residual (actual - predicted GP WR rating, from `checkpoint_dir`,
+default rate_set.CHECKPOINT_DIR -- it must be the checkpoint trained on the same
+split this script rebuilds) across buckets. Read-only diagnostic, no training,
+same residual computation as feature_search.py, so the same caveat applies: train
+rows are in-sample for the checkpoint and their residuals are deflated.
 
 Run with: conda run -n env_coinche python -m mtg_rating.opponent_benefit_probe
 """
@@ -25,10 +27,10 @@ import statistics
 from mtg_rating.feature_search import _residuals, _WORD_RE, _PAREN_RE
 from mtg_rating.features import structured_features
 from mtg_rating.multiset import build_dataset
-from mtg_rating.rate_set import load_model
+from mtg_rating.rate_set import CHECKPOINT_DIR, load_model
 from mtg_rating.ratings import RAW_SCORE_FORMULAS
 from mtg_rating.set_context import compute_set_context_vectors
-from mtg_rating.train_lora import SPLIT_SEED, TEST_FRACTION, VAL_FRACTION, split_by_name_3way
+from mtg_rating.train_lora import SPLIT_SEED, TEST_FRACTION, VAL_FRACTION, resolve_training_sets, split_by_name_3way
 
 TARGET_FORMULA = "gp_wr_only"
 
@@ -56,12 +58,12 @@ def _classify(oracle_text: str) -> str:
     return "none"
 
 
-def main():
-    model, formulas, use_set_context, norm_params = load_model()
+def main(checkpoint_dir=CHECKPOINT_DIR, set_codes=None):
+    model, formulas, use_set_context, norm_params = load_model(checkpoint_dir)
     target_idx = formulas.index(TARGET_FORMULA)
     mu, sigma = norm_params[target_idx]
 
-    records = build_dataset()
+    records = build_dataset(resolve_training_sets(set_codes, checkpoint_dir))
     for r in records:
         r["structured"] = structured_features(r["scryfall_card"])
         r["oracle_text"] = r["scryfall_card"].get("oracle_text", "") or ""
@@ -69,7 +71,8 @@ def main():
         set_context_vectors = compute_set_context_vectors(records)
         for r in records:
             r["set_context"] = set_context_vectors[r["set_code"]]
-    records = [r for r in records if RAW_SCORE_FORMULAS[TARGET_FORMULA](r) is not None]
+    # Same filter as train_lora.main (every formula the checkpoint outputs), so the by-name split matches.
+    records = [r for r in records if all(RAW_SCORE_FORMULAS[f](r) is not None for f in formulas)]
 
     train_sel, val_sel, _test_sel = split_by_name_3way(records, VAL_FRACTION, TEST_FRACTION, SPLIT_SEED)
     pool = [r for r in records if r["name"] in train_sel or r["name"] in val_sel]
