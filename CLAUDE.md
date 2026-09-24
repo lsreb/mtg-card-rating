@@ -195,14 +195,18 @@ main(
 )
 ```
 
-**Current baseline: `lora_joint_dual_msh`** (trained 2026-09-21; seed 0; 27-set pool; 4729 /
-679 / 1356 train / val / test rows, `SPLIT_SEED=42`; best val epoch 13, early stop at epoch 21,
-~6 min on the GTX 1660 Super). Saved by adding `checkpoint_dir="data/models/lora_joint_dual_msh"`
-to the call above (str or `Path`; coerced since 2026-09-21, before that a str crashed at the very end of training). Test
-performance: combined MSE 1.820; `iih_only` MSE 1.597, r 0.599; `gp_wr_only` MSE 2.043,
-r 0.469. Single seed. Compare new experiments against this, on this split; the numbers in
-the next paragraph belong to the 26-set checkpoint's own, different split and are not
-comparable to it.
+**Current baseline: `lora_joint_dual_msh`** (27-set pool; 4729 / 679 / 1356 train / val /
+test rows, `SPLIT_SEED=42`). Saved by adding `checkpoint_dir="data/models/lora_joint_dual_msh"`
+to the call above (str or `Path`; coerced since 2026-09-21). **3-seed confirmed 2026-09-24**
+(seeds 0/1/2, same split, only model init/batch order vary): best val MSE 1.725 +/- 0.021
+(seed 2 lowest at 1.709, epoch 25, ~7 min/seed on the GTX 1660 Super -- kept as the checkpoint,
+picked by val per this project's rule, never test); test combined MSE 1.815 +/- 0.010;
+`iih_only` MSE 1.585 +/- 0.012, r 0.606 +/- 0.008; `gp_wr_only` MSE 2.045 +/- 0.026,
+r 0.477 +/- 0.010 (mean +/- sample std across the 3 seeds). Every seed's single-run number
+was within 1 std of this mean, so the earlier seed-0-only figures weren't misleading -- this
+confirms them rather than overturning them. Compare new experiments against this, on this
+split; the numbers in the next paragraph belong to the 26-set checkpoint's own, different
+split and are not comparable to it.
 
 Exact test-set performance of the 26-set `lora_joint_dual` checkpoint (1303 test rows, `SPLIT_SEED=42`,
 deterministic -- re-measured directly by loading `lora_joint_dual/head.pt` and
